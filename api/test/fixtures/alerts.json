@@ -1,0 +1,66 @@
+[
+  {
+    "timestamp": "2026-10-05T08:15:00Z",
+    "device_id": "esp8266-lab-01",
+    "measurements": {
+      "temperature_c": 21.4,
+      "humidity_pct": 55,
+      "battery_v": 3.28
+    },
+    "sensor_states": {
+      "temperature": "ok",
+      "motion": false
+    }
+  },
+  {
+    "timestamp": "2026-10-05T08:30:00Z",
+    "device_id": "esp8266-lab-02",
+    "measurements": {
+      "temperature_c": 24.1,
+      "humidity_pct": 48,
+      "battery_v": 3.11
+    },
+    "sensor_states": {
+      "temperature": "ok",
+      "motion": true
+    }
+  },
+  {
+    "timestamp": "2026-10-05T09:00:00Z",
+    "device_id": "esp8266-greenhouse",
+    "measurements": {
+      "temperature_c": 28.7,
+      "humidity_pct": 72,
+      "soil_moisture_pct": 34
+    },
+    "sensor_states": {
+      "temperature": "warning",
+      "irrigation": false
+    }
+  },
+  {
+    "timestamp": "2026-10-05T09:15:30+02:00",
+    "device_id": "esp8266-entrance",
+    "measurements": {
+      "temperature_c": 19.8,
+      "light_lux": 126
+    },
+    "sensor_states": {
+      "door": "open",
+      "motion": true
+    }
+  },
+  {
+    "timestamp": "2026-10-05T10:45:00Z",
+    "device_id": "esp8266-lab-01",
+    "measurements": {
+      "temperature_c": 22,
+      "humidity_pct": 53,
+      "battery_v": 3.27
+    },
+    "sensor_states": {
+      "temperature": "ok",
+      "motion": false
+    }
+  }
+]
