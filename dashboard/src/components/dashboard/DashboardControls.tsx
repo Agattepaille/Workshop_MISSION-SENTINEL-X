@@ -3,10 +3,12 @@ import { Button } from "@/components/ui/button";
 export default function DashboardControls() {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-800 bg-black">
-      <div className="flex h-20 shrink-0 items-center gap-3 border-b border-neutral-800 px-6">
-        <div
+      <div className="flex h-24 shrink-0 items-center gap-4 border-b border-neutral-800 px-6">
+        <img
+          src="/logo.svg"
+          alt=""
           aria-hidden="true"
-          className="h-4 w-4 shrink-0 rounded-sm bg-emerald-500"
+          className="h-14 w-14 shrink-0 object-contain"
         />
         <h1 className="text-lg font-bold tracking-widest text-white">
           AetherCorp
