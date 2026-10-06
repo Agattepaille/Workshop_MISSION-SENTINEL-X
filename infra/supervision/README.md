@@ -81,6 +81,46 @@ La configuration applicative (compte du hub, clé et jeton de l'agent) reste
 - **Sans tunnel** (accès immédiat) : `ssh -L 18090:127.0.0.1:8090 -p 2222 …`
   puis `http://127.0.0.1:18090`.
 
+## Vue applicative dans Beszel
+
+En plus de la machine, Beszel surveille **ce que la machine héberge** : deux
+sondes HTTP sur l'API et les courbes de ressources de chaque conteneur.
+
+### Sondes de disponibilité
+
+| Sonde | Cible | Protocole | Intervalle |
+|---|---|---|---|
+| `api-loopback` | `http://127.0.0.1:3000/api/v1/alerts?limit=1` | `http` | 30 s |
+| `api-ingestion-esp` | `http://10.73.42.1:3000/api/v1/alerts?limit=1` | `http` | 30 s |
+
+Beszel compte une perte dès que la requête échoue **ou que le statut est ≥ 400**.
+Un `500` renvoyé par l'API (base injoignable) est donc détecté, et pas seulement
+un arrêt du service. La seconde sonde couvre le chemin emprunté par les ESP8266.
+
+Une alerte **`NetworkMonitorLoss`** est configurée sur le système. Vérifié le
+06/10/2026 en arrêtant volontairement l'API : **37,5 % et 50 % de perte** relevés,
+alerte passée à `triggered`, puis retour à la normale après relance.
+
+### Ressources des conteneurs
+
+Beszel doit lire l'état des conteneurs. Le socket Docker donne un accès **équivalent
+root** sur l'hôte : il n'est donc **jamais** monté dans l'agent. À la place, la stack
+expose `sentinel-docker-proxy` (`linuxserver/socket-proxy:3.4.6`, `CONTAINERS=1`),
+qui ne laisse passer que la lecture des conteneurs.
+
+- Vérifié : `GET /containers/json` → `200`, mais `POST /containers/create` → `403`
+  et `GET /images/json` → `403`.
+- Le port du proxy n'écoute qu'en `127.0.0.1:2375`.
+- L'agent reçoit `DOCKER_HOST=tcp://127.0.0.1:2375` dans son unité systemd.
+  **Adresse IP obligatoire** : un agent hors Docker ne résout pas les noms de
+  réseau Compose (l'utiliserait-il en `network_mode: host`).
+
+`DOCKER_IMAGE_CHECK=false` évite d'interroger les registres depuis le partage de
+connexion.
+
+Empreinte relevée : `sentinel-api` 43,9 Mio, `sentinel-influxdb` 33,1 Mio,
+`sentinel-docker-proxy` 18,9 Mio.
+
 ## Alertes configurées
 
 | Alerte | Seuil | Délai |

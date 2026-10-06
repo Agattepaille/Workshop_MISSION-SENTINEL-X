@@ -71,6 +71,32 @@ services:
         limits:
           memory: 512m
 
+  # --- Proxy de socket pour la supervision ---------------------------------
+  # Beszel doit connaitre l etat des conteneurs. Plutot que de lui donner le
+  # socket Docker (equivalent a un acces root sur l hote), on interpose un
+  # proxy qui ne laisse passer QUE la lecture des conteneurs (CONTAINERS=1).
+  # Methode recommandee par le maintienor de Beszel. Port sur la loopback.
+  docker-proxy:
+    image: linuxserver/socket-proxy:3.4.6   # lscr.io ne resolvait pas via le partage de connexion
+    container_name: sentinel-docker-proxy
+    restart: unless-stopped
+    networks: [sentinel-edge]
+    environment:
+      CONTAINERS: "1"
+    ports:
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
 networks:
   # Reseau ETANCHE entre l API et la base : aucun trafic sortant, et surtout
   # aucun port publie. La base n est joignable que par l API.
