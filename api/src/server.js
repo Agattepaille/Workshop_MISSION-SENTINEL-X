@@ -1,11 +1,16 @@
+import "dotenv/config";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
-import { createAlertRepository } from "./persistence/alert-repository.sqlite.js";
+import { createAlertRepository } from "./persistence/alert-repository.influx.js";
 import {
   AlertValidationError,
-  createAlertService,
-} from "./services/alert-service.js";
+  createAlertWriteService,
+} from "./services/alert-write-service.js";
+import {
+  AlertReadValidationError,
+  createAlertReadService,
+} from "./services/alert-read-service.js";
 
 const ALERTS_PATH = "/api/v1/alerts";
 const WEBSOCKET_PATH = "/ws";
@@ -66,19 +71,69 @@ async function readJsonBody(request) {
   }
 }
 
-export function createAlertServer({
-  databasePath = process.env.DATABASE_PATH ?? ".data/sentinel-x.sqlite",
-  alertRepository = createAlertRepository(databasePath),
-} = {}) {
-  const alertService = createAlertService({ alertRepository });
+export function createAlertServer({ alertRepository } = {}) {
+  const repository = alertRepository ?? createAlertRepository();
+  const alertWriteService = createAlertWriteService({
+    alertRepository: repository,
+  });
+  const alertReadService = createAlertReadService({
+    alertRepository: repository,
+  });
   const websocketServer = new WebSocketServer({ noServer: true });
 
   const server = createServer(async (request, response) => {
-    const { pathname } = new URL(request.url, "http://localhost");
+    const requestUrl = new URL(request.url, "http://localhost");
+    const { pathname } = requestUrl;
     if (pathname !== ALERTS_PATH) {
       sendJson(response, 404, {
         error: { code: "not_found", message: "Route not found." },
       });
+      return;
+    }
+
+    if (request.method === "GET") {
+      try {
+        const allowedQueryParameters = new Set(["limit", "cursor"]);
+        for (const name of requestUrl.searchParams.keys()) {
+          if (!allowedQueryParameters.has(name)) {
+            throw new AlertReadValidationError(
+              "Invalid alert query parameters.",
+              [{ field: name, message: "Unknown query parameter." }],
+            );
+          }
+          if (requestUrl.searchParams.getAll(name).length !== 1) {
+            throw new AlertReadValidationError(
+              "Invalid alert query parameters.",
+              [{ field: name, message: "Query parameter must appear once." }],
+            );
+          }
+        }
+
+        const result = await alertReadService.list({
+          limit: requestUrl.searchParams.get("limit") ?? undefined,
+          cursor: requestUrl.searchParams.get("cursor") ?? undefined,
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof AlertReadValidationError) {
+          sendJson(response, 400, {
+            error: {
+              code: "invalid_query",
+              message: error.message,
+              ...(error.details.length > 0 ? { details: error.details } : {}),
+            },
+          });
+          return;
+        }
+
+        console.error("Failed to read alerts:", error);
+        sendJson(response, 500, {
+          error: {
+            code: "internal_error",
+            message: "The alerts could not be retrieved.",
+          },
+        });
+      }
       return;
     }
 
@@ -89,18 +144,20 @@ export function createAlertServer({
         {
           error: {
             code: "method_not_allowed",
-            message: "Use POST for this route.",
+            message: "Use GET or POST for this route.",
           },
         },
         {
-          allow: "POST",
+          allow: "GET, POST",
         },
       );
       return;
     }
 
     try {
-      const savedAlert = alertService.create(await readJsonBody(request));
+      const savedAlert = await alertWriteService.create(
+        await readJsonBody(request),
+      );
       const notification = JSON.stringify({
         type: "alert.created",
         data: savedAlert,
@@ -181,7 +238,7 @@ export function createAlertServer({
         });
       }
       websocketServer.close();
-      alertRepository.close();
+      await repository.close();
     },
   };
 }

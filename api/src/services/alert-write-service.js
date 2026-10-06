@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 export class AlertValidationError extends Error {
   constructor(message, details = []) {
     super(message);
@@ -163,12 +165,13 @@ function validateAlert(value) {
   };
 }
 
-export function createAlertService({ alertRepository }) {
+export function createAlertWriteService({ alertRepository }) {
   return {
-    create(input) {
+    async create(input) {
       const alert = validateAlert(input);
       const receivedAt = new Date().toISOString();
-      const id = alertRepository.save(alert, receivedAt);
+      const id = randomUUID();
+      await alertRepository.save(alert, receivedAt, id);
 
       return {
         id,
