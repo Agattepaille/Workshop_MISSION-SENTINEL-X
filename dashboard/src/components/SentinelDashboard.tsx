@@ -16,6 +16,11 @@ import DashboardControls from "./dashboard/DashboardControls";
 import DashboardFooter from "./dashboard/DashboardFooter";
 import EnvironmentalCharts from "./dashboard/EnvironmentalCharts";
 import KpiCard from "./dashboard/KpiCard";
+import {
+  commandTargets,
+  configuredDeviceIds,
+} from "../config/deviceCommandTargets";
+import { useDeviceCommands } from "../hooks/useDeviceCommands";
 
 const numberFormat = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 2,
@@ -33,7 +38,23 @@ export default function SentinelDashboard(): ReactElement {
       count: 0,
       confidence: 0,
     });
-  const { alerts, loading, error, connectionStatus } = useAlerts();
+  const {
+    alerts,
+    loading,
+    error,
+    connectionStatus,
+    deviceStatuses,
+    deviceStatusError,
+    commandUpdates,
+  } = useAlerts(configuredDeviceIds);
+  const {
+    commands,
+    latestCommand,
+    submittingActions,
+    error: commandError,
+    statusError,
+    sendCommand,
+  } = useDeviceCommands(commandUpdates, connectionStatus);
 
   const handleDetectionChange = useCallback(
     (summary: CameraDetectionSummary) => setCameraDetection(summary),
@@ -110,7 +131,18 @@ export default function SentinelDashboard(): ReactElement {
 
   return (
     <div className="dark flex min-h-screen bg-black font-sans text-neutral-300">
-      <DashboardControls />
+      <DashboardControls
+        deviceIds={commandTargets}
+        deviceStatuses={deviceStatuses}
+        commands={commands}
+        latestCommand={latestCommand}
+        submittingActions={submittingActions}
+        error={commandError}
+        statusError={[deviceStatusError, statusError]
+          .filter((message): message is string => message !== null)
+          .join(" ")}
+        onSendCommand={sendCommand}
+      />
 
       <main className="flex h-screen flex-1 flex-col overflow-hidden">
         <section className="grid grid-cols-5 border-b border-neutral-800">
