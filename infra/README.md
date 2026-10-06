@@ -84,15 +84,35 @@ curl -s http://127.0.0.1:3000/api/health   # Grafana
 
 ## 5. Supervision
 
-Dashboard **Sentinel-X — Supervision RPi, Docker & MQTT** (10 panneaux) :
-CPU, RAM, disque, uptime, etat des conteneurs, charge et trafic broker.
+Dashboard **Sentinel-X - Supervision** : 4 sections (Point d'acces WiFi & ESP,
+Broker MQTT/MQTTS, Raspberry Pi, Conteneurs Docker), 21 panneaux.
 
 Acces : `https://grafana.nyasaoto.dev`
 → mur Cloudflare Access (email) → login Grafana `equipe` (lecture seule).
 
 Le dashboard est **volontairement** limite a la supervision de l'infrastructure.
 Les donnees capteurs ne sont pas affichees ici : elles sont consommees par
-l'API et le modele IA.
+l'API et le modele IA (voir `INTERFACE_DEV.md`).
+
+### Ajouter une donnee au tableau de bord
+
+La source de verite est un fichier JSON, pas l'interface Grafana : on modifie
+le fichier, on regenere, et le dashboard est a jour. Aucun clic, et c'est
+versionne.
+
+```bash
+# 1. editer la liste des donnees a afficher
+nano /opt/sentinel-x/grafana/spec-supervision.json
+#    "actif": true/false  pour activer ou masquer une mesure
+
+# 2. regenerer et recharger
+python3 /opt/sentinel-x/scripts/gen-dashboard.py
+docker compose -f /opt/sentinel-x/docker-compose.yml restart grafana
+```
+
+Chaque mesure y est decrite par sa section, son titre, son unite, la mesure
+InfluxDB et les champs ou topics a afficher. Des exemples commentes sont
+fournis dans le fichier `scripts/spec-supervision.json`.
 
 ## 6. Difficultes rencontrees
 

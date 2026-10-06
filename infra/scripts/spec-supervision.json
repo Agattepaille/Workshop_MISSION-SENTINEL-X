@@ -1,0 +1,330 @@
+{
+  "_doc": "Fichier source de verite du dashboard Grafana. Ajoute ou desactive des mesures ici, puis regenere : python3 /opt/sentinel-x/scripts/gen-dashboard.py",
+  "_version": "1.0",
+  "_regenerate": "python3 /opt/sentinel-x/scripts/gen-dashboard.py && docker compose -f /opt/sentinel-x/docker-compose.yml restart grafana",
+  "dashboard": {
+    "uid": "sentinel-supervision",
+    "title": "Sentinel-X - Supervision",
+    "refresh": "10s",
+    "time_from": "now-1h"
+  },
+  "sections": [
+    {
+      "id": "ap",
+      "titre": "Point d'acces WiFi & ESP",
+      "description": "Sante du lien radio entre la borne et les cartes ESP",
+      "mesures": [
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Trafic WiFi (wlan0) - octets/s",
+          "unite": "Bps",
+          "mesure": "net",
+          "filtres": {
+            "interface": "wlan0"
+          },
+          "champs": [
+            "bytes_recv",
+            "bytes_sent"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Paquets WiFi (wlan0)",
+          "unite": "pps",
+          "mesure": "net",
+          "filtres": {
+            "interface": "wlan0"
+          },
+          "champs": [
+            "packets_recv",
+            "packets_sent"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Erreurs WiFi (wlan0)",
+          "unite": "short",
+          "mesure": "net",
+          "filtres": {
+            "interface": "wlan0"
+          },
+          "champs": [
+            "err_in",
+            "err_out"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "entree",
+            "sortie"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "table",
+          "titre": "Stations WiFi associees (ESP)",
+          "unite": "short",
+          "mesure": "ap_stations",
+          "champs": [
+            "signal_dbm",
+            "rx_bytes",
+            "tx_bytes"
+          ],
+          "note": "Vide tant qu'aucun ESP n'est associe - se remplit des la 1ere connexion"
+        },
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Nombre de stations associees",
+          "unite": "short",
+          "mesure": "ap_stations",
+          "champ": "signal_dbm",
+          "aggregation": "count_stations"
+        }
+      ]
+    },
+    {
+      "id": "mqtt",
+      "titre": "Broker MQTT / MQTTS",
+      "description": "Activite du bus d'echange entre les ESP, l'API et l'IA",
+      "mesures": [
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Messages recus / envoyes",
+          "unite": "short",
+          "mesure": "mqtt_broker",
+          "topics": [
+            "$SYS/broker/messages/received",
+            "$SYS/broker/messages/sent"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Charge messages (1 min)",
+          "unite": "short",
+          "mesure": "mqtt_broker",
+          "topics": [
+            "$SYS/broker/load/messages/received/1min",
+            "$SYS/broker/load/messages/sent/1min"
+          ],
+          "legende": [
+            "recus/s",
+            "emis/s"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Octets echanges",
+          "unite": "bytes",
+          "mesure": "mqtt_broker",
+          "topics": [
+            "$SYS/broker/bytes/received",
+            "$SYS/broker/bytes/sent"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Clients MQTT connectes",
+          "unite": "short",
+          "mesure": "mqtt_broker",
+          "topics": [
+            "$SYS/broker/clients/connected"
+          ],
+          "note": "Apparait des qu'un client (ESP/API/IA) se connecte"
+        },
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Abonnements actifs",
+          "unite": "short",
+          "mesure": "mqtt_broker",
+          "topics": [
+            "$SYS/broker/subscriptions/count"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rpi",
+      "titre": "Raspberry Pi",
+      "description": "Sante de la machine qui heberge la borne",
+      "mesures": [
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Uptime",
+          "unite": "s",
+          "mesure": "system",
+          "champ": "uptime",
+          "aggregation": "last"
+        },
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Charge moyenne (1 min)",
+          "unite": "short",
+          "mesure": "system",
+          "champ": "load1",
+          "aggregation": "last"
+        },
+        {
+          "actif": false,
+          "type": "stat",
+          "titre": "Processus",
+          "unite": "short",
+          "mesure": "system",
+          "champ": "n_procs",
+          "aggregation": "last"
+        },
+        {
+          "actif": false,
+          "type": "stat",
+          "titre": "Utilisateurs connectes",
+          "unite": "short",
+          "mesure": "system",
+          "champ": "n_users",
+          "aggregation": "last"
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "CPU (%)",
+          "unite": "percent",
+          "mesure": "cpu",
+          "champs": [
+            "usage_user",
+            "usage_system"
+          ],
+          "legende": [
+            "utilisateur",
+            "systeme"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Memoire (%)",
+          "unite": "percent",
+          "mesure": "mem",
+          "champ": "used_percent"
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Disque (%)",
+          "unite": "percent",
+          "mesure": "disk",
+          "champ": "used_percent"
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Trafic eth0 (lien PC/externe)",
+          "unite": "Bps",
+          "mesure": "net",
+          "filtres": {
+            "interface": "eth0"
+          },
+          "champs": [
+            "bytes_recv",
+            "bytes_sent"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "docker",
+      "titre": "Conteneurs Docker",
+      "description": "Etat et consommation des services de la borne",
+      "mesures": [
+        {
+          "actif": true,
+          "type": "stat",
+          "titre": "Conteneurs en marche",
+          "unite": "short",
+          "mesure": "docker_container_status",
+          "champ": "pid",
+          "aggregation": "count_running"
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "CPU par conteneur (%)",
+          "unite": "percent",
+          "mesure": "docker_container_cpu",
+          "champ": "usage_percent"
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Memoire par conteneur",
+          "unite": "mbytes",
+          "mesure": "docker_container_mem",
+          "champ": "usage",
+          "diviser_par": 1048576
+        },
+        {
+          "actif": true,
+          "type": "timeseries",
+          "titre": "Trafic reseau par conteneur",
+          "unite": "Bps",
+          "mesure": "docker_container_net",
+          "champs": [
+            "rx_bytes",
+            "tx_bytes"
+          ],
+          "aggregation": "derivative",
+          "legende": [
+            "recus",
+            "emis"
+          ]
+        },
+        {
+          "actif": true,
+          "type": "table",
+          "titre": "Etat des conteneurs",
+          "unite": "short",
+          "mesure": "docker_container_status",
+          "champs": [
+            "pid",
+            "uptime_ns",
+            "restart_count",
+            "oomkilled",
+            "exitcode"
+          ]
+        }
+      ]
+    }
+  ]
+}

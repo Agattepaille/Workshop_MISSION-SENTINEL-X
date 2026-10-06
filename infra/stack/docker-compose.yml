@@ -6,6 +6,7 @@ services:
     networks: [core]
     ports:
       - "0.0.0.0:8883:8883"
+      - "10.73.42.1:1883:1883"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/certs:/mosquitto/certs
@@ -37,18 +38,21 @@ services:
     image: telegraf:1.32
     container_name: sentinel-telegraf
     restart: unless-stopped
-    networks: [core]
+    network_mode: host
     entrypoint: ["/usr/bin/telegraf","--config","/etc/telegraf/telegraf.conf"]
     environment:
-      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_URL: http://127.0.0.1:8086
       INFLUXDB_ORG: ${INFLUXDB_ORG}
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
       INFLUXDB_TOKEN: ${INFLUXDB_ADMIN_TOKEN}
       MQTT_USER: ${MOSQUITTO_IA_USER}
       MQTT_PASSWORD: ${MOSQUITTO_IA_PASSWORD}
     volumes:
-      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /etc/telegraf-host:/etc/telegraf:ro
+      - /opt/sentinel-x/scripts:/opt/scripts:ro
+      - /var/lib/ap-stations:/var/lib/ap-stations:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /usr/sbin/iw:/usr/sbin/iw:ro
     user: "0:0"
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
