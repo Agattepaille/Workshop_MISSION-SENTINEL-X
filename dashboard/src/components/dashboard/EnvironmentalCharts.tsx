@@ -1,8 +1,8 @@
 import EnvironmentalChart from "./EnvironmentalChart";
-import type { Alert } from "../../hooks/useAlerts";
+import type { EnvironmentalAlert } from "./dashboardData";
 
 interface EnvironmentalChartsProps {
-  alerts: Alert[];
+  history: EnvironmentalAlert[];
   loading: boolean;
   error: string | null;
 }
@@ -35,12 +35,12 @@ function getLabel(measurement: string): string {
 }
 
 export default function EnvironmentalCharts({
-  alerts,
+  history,
   loading,
   error,
 }: EnvironmentalChartsProps) {
   const measurements = [
-    ...new Set(alerts.flatMap((alert) => Object.keys(alert.measurements))),
+    ...new Set(history.flatMap((alert) => Object.keys(alert.measurements))),
   ].sort();
 
   return (
@@ -48,7 +48,7 @@ export default function EnvironmentalCharts({
       {measurements.length > 0 ? (
         <div className="divide-y divide-neutral-800">
           {measurements.map((measurement) => {
-            const points = [...alerts].reverse().flatMap((alert) => {
+            const points = [...history].reverse().flatMap((alert) => {
               const value = alert.measurements[measurement];
               return typeof value === "number"
                 ? [{ timestamp: alert.timestamp, value }]
@@ -74,7 +74,7 @@ export default function EnvironmentalCharts({
             ? "Chargement des mesures…"
             : error
               ? `Impossible de charger les mesures : ${error}`
-              : alerts.length === 0
+              : history.length === 0
                 ? "Aucune alerte disponible."
                 : "Les alertes reçues ne contiennent pas de mesures."}
         </div>

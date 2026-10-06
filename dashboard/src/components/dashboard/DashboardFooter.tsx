@@ -1,8 +1,9 @@
-import type { Alert, AlertConnectionStatus } from "../../hooks/useAlerts";
+import type { AlertConnectionStatus } from "../../hooks/useAlerts";
+import type { DashboardLogEntry } from "./dashboardData";
 import DashboardLogs from "./DashboardLogs";
 
 interface DashboardFooterProps {
-  alerts: Alert[];
+  entries: DashboardLogEntry[];
   connectionStatus: AlertConnectionStatus;
   loading: boolean;
   error: string | null;

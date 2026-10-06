@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge";
-import type { Alert, AlertConnectionStatus } from "../../hooks/useAlerts";
+import type { AlertConnectionStatus } from "../../hooks/useAlerts";
+import type { DashboardLogEntry } from "./dashboardData";
 
 interface DashboardLogsProps {
-  alerts: Alert[];
+  entries: DashboardLogEntry[];
   connectionStatus: AlertConnectionStatus;
   loading: boolean;
   error: string | null;
@@ -15,7 +16,7 @@ const CONNECTION_LABELS: Record<AlertConnectionStatus, string> = {
   reconnecting: "Reconnexion",
 };
 
-function formatAlert(alert: Alert): string {
+function formatAlert(alert: DashboardLogEntry): string {
   const timestamp = new Date(alert.timestamp).toLocaleTimeString("fr-FR");
   const details = [
     ...Object.entries(alert.measurements).map(
@@ -30,7 +31,7 @@ function formatAlert(alert: Alert): string {
 }
 
 export default function DashboardLogs({
-  alerts,
+  entries,
   connectionStatus,
   loading,
   error,
@@ -58,12 +59,12 @@ export default function DashboardLogs({
             {error}
           </p>
         )}
-        {loading && alerts.length === 0 ? (
+        {loading && entries.length === 0 ? (
           <p className="truncate text-neutral-500">Chargement des alertes…</p>
-        ) : alerts.length === 0 ? (
+        ) : entries.length === 0 ? (
           <p className="truncate text-neutral-500">Aucune alerte reçue.</p>
         ) : (
-          alerts.slice(0, 2).map((alert) => (
+          entries.slice(0, 2).map((alert) => (
             <p
               key={alert.id}
               className="truncate text-emerald-400/70"

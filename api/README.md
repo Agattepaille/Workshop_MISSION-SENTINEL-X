@@ -15,6 +15,7 @@ handles transport concerns and delegates to the appropriate service.
 InfluxDB connection settings and client APIs are isolated in
 `src/persistence/influx-client.js`; alert points are written and queried by
 `src/persistence/alert-repository.influx.js`.
+The point layout is documented in [INFLUXDB_SCHEMA.md](INFLUXDB_SCHEMA.md).
 `createAlertServer` accepts an `alertRepository` option for injecting another
 implementation, which lets tests run without an InfluxDB server.
 

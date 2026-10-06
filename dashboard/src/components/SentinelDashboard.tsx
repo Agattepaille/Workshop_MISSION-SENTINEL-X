@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Activity,
@@ -9,7 +9,9 @@ import {
 } from "lucide-react";
 
 import { useAlerts } from "../hooks/useAlerts";
-import CameraPanel from "./dashboard/CameraPanel";
+import CameraPanel, {
+  type CameraDetectionSummary,
+} from "./dashboard/CameraPanel";
 import DashboardControls from "./dashboard/DashboardControls";
 import DashboardFooter from "./dashboard/DashboardFooter";
 import EnvironmentalCharts from "./dashboard/EnvironmentalCharts";
@@ -24,22 +26,43 @@ function formatDateTime(value: string): string {
 }
 
 export default function SentinelDashboard(): ReactElement {
-  const [personCount, setPersonCount] = useState(0);
-  const [confidence, setConfidence] = useState(0);
-  const [aiConnected, setAiConnected] = useState(false);
+  const [cameraDetection, setCameraDetection] =
+    useState<CameraDetectionSummary>({
+      serviceStatus: "connecting",
+      cameraStatus: "starting",
+      count: 0,
+      confidence: 0,
+    });
   const { alerts, loading, error, connectionStatus } = useAlerts();
 
   const handleDetectionChange = useCallback(
-    (count: number, detectionConfidence: number, connected: boolean) => {
-      setPersonCount(count);
-      setConfidence(detectionConfidence);
-      setAiConnected(connected);
-    },
+    (summary: CameraDetectionSummary) => setCameraDetection(summary),
     [],
   );
 
   const latestAlert = alerts[0];
   const measurements = latestAlert?.measurements;
+  const chartHistory = useMemo(
+    () =>
+      alerts.map(({ timestamp, measurements: alertMeasurements }) => ({
+        timestamp,
+        measurements: alertMeasurements,
+      })),
+    [alerts],
+  );
+  const logEntries = useMemo(
+    () =>
+      alerts.map(
+        ({ id, timestamp, device_id, measurements, sensor_states }) => ({
+          id,
+          timestamp,
+          device_id,
+          measurements,
+          sensor_states,
+        }),
+      ),
+    [alerts],
+  );
   const environmentReadings = [
     typeof measurements?.temperature_c === "number"
       ? `${numberFormat.format(measurements.temperature_c)} °C`
@@ -54,16 +77,36 @@ export default function SentinelDashboard(): ReactElement {
       ? "Indisponible"
       : "Aucune donnée";
 
-  const detectionValue = !aiConnected
-    ? "IA déconnectée"
-    : personCount > 0
-      ? `${personCount} intrus détecté${personCount > 1 ? "s" : ""}`
-      : "Aucun intrus";
-  const detectionSubtext = !aiConnected
-    ? "Serveur YOLO indisponible"
-    : personCount > 0
-      ? `YOLOv8 • Confiance: ${confidence}%`
-      : "YOLOv8 • Surveillance active";
+  const detectionValue =
+    cameraDetection.serviceStatus === "connecting"
+      ? "Connexion en cours"
+      : cameraDetection.serviceStatus === "disconnected"
+        ? "IA déconnectée"
+        : cameraDetection.cameraStatus === "starting"
+          ? "Caméra en initialisation"
+          : cameraDetection.cameraStatus === "unavailable"
+            ? "Caméra indisponible"
+            : cameraDetection.cameraStatus === "error"
+              ? "Erreur de détection"
+              : cameraDetection.count > 0
+                ? `${cameraDetection.count} intrus détecté${cameraDetection.count > 1 ? "s" : ""}`
+                : "Aucun intrus";
+  const detectionSubtext =
+    cameraDetection.serviceStatus === "connecting"
+      ? "Connexion au service de vision"
+      : cameraDetection.serviceStatus === "disconnected"
+        ? "Vérifiez que le serveur YOLO est démarré"
+        : cameraDetection.cameraStatus === "starting"
+          ? "Initialisation de la caméra et du modèle"
+          : cameraDetection.cameraStatus === "unavailable"
+            ? "Vérifiez que la caméra est branchée et activée"
+            : cameraDetection.cameraStatus === "error"
+              ? "Consultez les logs du serveur IA"
+              : cameraDetection.count > 0
+                ? `YOLOv8 • Confiance: ${cameraDetection.confidence}%`
+                : "YOLOv8 • Surveillance active";
+  const detectionAlert =
+    cameraDetection.count > 0 || cameraDetection.cameraStatus === "error";
 
   return (
     <div className="dark flex min-h-screen bg-black font-sans text-neutral-300">
@@ -121,13 +164,14 @@ export default function SentinelDashboard(): ReactElement {
             subtext={detectionSubtext}
             icon={Activity}
             iconColor={
-              personCount > 0
+              detectionAlert
                 ? "text-red-500"
-                : aiConnected
+                : cameraDetection.serviceStatus === "connected" &&
+                    cameraDetection.cameraStatus === "active"
                   ? "text-emerald-500"
                   : "text-amber-500"
             }
-            alert={personCount > 0}
+            alert={detectionAlert}
           />
 
           <KpiCard
@@ -147,14 +191,14 @@ export default function SentinelDashboard(): ReactElement {
         <section className="flex flex-1 overflow-hidden">
           <CameraPanel onDetectionChange={handleDetectionChange} />
           <EnvironmentalCharts
-            alerts={alerts}
+            history={chartHistory}
             loading={loading}
             error={error}
           />
         </section>
 
         <DashboardFooter
-          alerts={alerts}
+          entries={logEntries}
           connectionStatus={connectionStatus}
           loading={loading}
           error={error}
