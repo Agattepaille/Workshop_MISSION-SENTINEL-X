@@ -6,11 +6,11 @@ relational `CREATE TABLE` definition.
 
 ## Database and measurement
 
-| Item | Name | Description |
-|---|---|---|
-| Database | `INFLUX_DATABASE` (defaults to `alerts`) | Configured through the API environment |
-| Measurement | `alerts` | One point for each accepted alert |
-| Point timestamp | `timestamp` | The alert's RFC 3339 timestamp, stored as InfluxDB time |
+| Item            | Name                                     | Description                                             |
+| --------------- | ---------------------------------------- | ------------------------------------------------------- |
+| Database        | `INFLUX_DATABASE` (defaults to `alerts`) | Configured through the API environment                  |
+| Measurement     | `alerts`                                 | One point for each accepted alert                       |
+| Point timestamp | `timestamp`                              | The alert's RFC 3339 timestamp, stored as InfluxDB time |
 
 Create the default database if it does not exist:
 
@@ -20,13 +20,13 @@ influxdb3 create database alerts --token '<your-influxdb3-token>'
 
 ## Point layout
 
-| Column | InfluxDB type | Source | Notes |
-|---|---|---|---|
-| `alert_id` | Tag (string) | API-generated UUID | Identifies the alert and breaks ties when listing alerts with the same timestamp |
-| `device_id` | Tag (string) | `device_id` in the request | Identifies the sending device |
-| `payload_json` | Field (string) | Complete validated alert, JSON-encoded | Preserves `timestamp`, `device_id`, `measurements`, and `sensor_states` |
-| `received_at` | Field (string) | API receipt time in RFC 3339 | Time the API accepted the alert; distinct from the point timestamp |
-| `measurement_<name>` | Field (float) | Each entry in `measurements` | For example, `measurements.temperature_c` becomes `measurement_temperature_c` |
+| Column               | InfluxDB type  | Source                                 | Notes                                                                            |
+| -------------------- | -------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
+| `alert_id`           | Tag (string)   | API-generated UUID                     | Identifies the alert and breaks ties when listing alerts with the same timestamp |
+| `device_id`          | Tag (string)   | `device_id` in the request             | Identifies the sending device                                                    |
+| `payload_json`       | Field (string) | Complete validated alert, JSON-encoded | Preserves `timestamp`, `device_id`, `measurements`, and `sensor_states`          |
+| `received_at`        | Field (string) | API receipt time in RFC 3339           | Time the API accepted the alert; distinct from the point timestamp               |
+| `measurement_<name>` | Field (float)  | Each entry in `measurements`           | For example, `measurements.temperature_c` becomes `measurement_temperature_c`    |
 
 The measurement field names are dynamic: the API accepts measurement names from
 1 to 64 characters and writes each numeric value as a float field prefixed with
