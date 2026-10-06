@@ -5,7 +5,7 @@ node_modules/
 .data/
 
 # Environment variables
-.env
+.env*
 
 # macOS
 .DS_Store

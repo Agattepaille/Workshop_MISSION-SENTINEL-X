@@ -1,0 +1,11 @@
+user esp
+topic write sentinel/table/sensors/#
+topic read sentinel/table/actuators/#
+user api
+topic read sentinel/table/sensors/#
+topic write sentinel/table/actuators/#
+topic read $SYS/#
+user ia
+topic read sentinel/table/sensors/#
+topic write sentinel/table/actuators/#
+topic read $SYS/#

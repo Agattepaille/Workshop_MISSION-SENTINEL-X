@@ -1,5 +1,29 @@
 # React + TypeScript + Vite
 
+## Running the dashboard with live alerts
+
+Install dependencies once with `npm install` in both `api/` and `dashboard/`.
+Then start the API and dashboard in separate terminals:
+
+```sh
+cd api
+npm start
+```
+
+```sh
+cd dashboard
+npm run dev
+```
+
+The Vite development proxy forwards `/api` requests and `/ws` WebSocket
+connections to the API at `http://127.0.0.1:3000`. The dashboard loads the
+latest 50 alerts when it starts, then listens for new `alert.created` events.
+If the WebSocket reconnects, it reloads the alert list to catch up.
+
+The Vite proxy only applies during development. In production, configure the
+web server or reverse proxy to forward `/api` and `/ws` to the API, including
+WebSocket upgrades.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

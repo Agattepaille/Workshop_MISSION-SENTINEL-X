@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import Database from "better-sqlite3";
 import WebSocket from "ws";
 import { createAlertServer } from "../src/server.js";
 
@@ -22,16 +18,35 @@ const sampleAlert = {
 };
 
 let app;
-let directory;
-let databasePath;
 let baseUrl;
 let websocketUrl;
 let sockets;
+let storedAlerts;
+let repositoryPageRequest;
 
 beforeEach(async () => {
-  directory = mkdtempSync(join(tmpdir(), "sentinel-x-api-"));
-  databasePath = join(directory, "alerts.sqlite");
-  app = createAlertServer({ databasePath });
+  storedAlerts = new Map();
+  repositoryPageRequest = undefined;
+  app = createAlertServer({
+    alertRepository: {
+      async save(alert, receivedAt, id) {
+        storedAlerts.set(id, {
+          id,
+          ...alert,
+          received_at: receivedAt,
+        });
+      },
+      async listPage(pageRequest) {
+        repositoryPageRequest = pageRequest;
+        return {
+          data: [...storedAlerts.values()].slice(0, pageRequest.limit),
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+      async close() {},
+    },
+  });
   sockets = [];
   await new Promise((resolveListen) =>
     app.server.listen(0, "127.0.0.1", resolveListen),
@@ -44,7 +59,6 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const socket of sockets) socket.terminate();
   await app.close();
-  rmSync(directory, { recursive: true, force: true });
 });
 
 async function connectWebSocket() {
@@ -52,15 +66,6 @@ async function connectWebSocket() {
   sockets.push(socket);
   await once(socket, "open");
   return socket;
-}
-
-function storedAlertCount() {
-  const database = new Database(databasePath, { readonly: true });
-  try {
-    return database.prepare("SELECT COUNT(*) AS count FROM alerts").get().count;
-  } finally {
-    database.close();
-  }
 }
 
 test("persists accepted alerts and broadcasts them over WebSocket", async () => {
@@ -80,8 +85,9 @@ test("persists accepted alerts and broadcasts them over WebSocket", async () => 
   assert.equal(responseBody.data.timestamp, "2026-10-05T12:00:00.000Z");
   assert.equal(notification.type, "alert.created");
   assert.equal(notification.data.id, responseBody.data.id);
+  assert.match(responseBody.data.id, /^[0-9a-f-]{36}$/);
   assert.equal(notification.data.measurements.temperature_c, 21.4);
-  assert.equal(storedAlertCount(), 1);
+  assert.equal(storedAlerts.size, 1);
 });
 
 test("rejects invalid alerts without storing or broadcasting them", async () => {
@@ -98,7 +104,7 @@ test("rejects invalid alerts without storing or broadcasting them", async () => 
 
   assert.equal(response.status, 422);
   assert.equal(responseBody.error.code, "validation_failed");
-  assert.equal(storedAlertCount(), 0);
+  assert.equal(storedAlerts.size, 0);
   assert.equal(socket.readyState, WebSocket.OPEN);
 });
 
@@ -113,16 +119,81 @@ test("rejects null measurement and sensor-state objects", async () => {
     assert.equal(response.status, 422, `${field} must not be null`);
   }
 
-  assert.equal(storedAlertCount(), 0);
+  assert.equal(storedAlerts.size, 0);
 });
 
-test("exposes only POST on the alert route", async () => {
-  const response = await fetch(`${baseUrl}/api/v1/alerts`);
+test("returns an error and does not broadcast when persistence fails", async () => {
+  await app.close();
+  app = createAlertServer({
+    alertRepository: {
+      async save() {
+        throw new Error("InfluxDB unavailable");
+      },
+      async close() {},
+    },
+  });
+  await new Promise((resolveListen) =>
+    app.server.listen(0, "127.0.0.1", resolveListen),
+  );
+  const address = app.server.address();
+  baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const response = await fetch(`${baseUrl}/api/v1/alerts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(sampleAlert),
+  });
+
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error.code, "internal_error");
+});
+
+test("reads alerts with cursor-pagination metadata", async () => {
+  const createResponse = await fetch(`${baseUrl}/api/v1/alerts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(sampleAlert),
+  });
+  const createdAlert = (await createResponse.json()).data;
+
+  const response = await fetch(`${baseUrl}/api/v1/alerts?limit=10`);
+  const responseBody = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseBody.data, [createdAlert]);
+  assert.deepEqual(responseBody.pagination, {
+    next_cursor: null,
+    has_more: false,
+  });
+  assert.deepEqual(repositoryPageRequest, { limit: 10, cursor: undefined });
+});
+
+test("rejects invalid alert-list query parameters", async () => {
+  for (const query of [
+    "limit=101",
+    "limit=1&limit=2",
+    "cursor=invalid",
+    "unexpected=true",
+  ]) {
+    const response = await fetch(`${baseUrl}/api/v1/alerts?${query}`);
+    const responseBody = await response.json();
+
+    assert.equal(response.status, 400, query);
+    assert.equal(responseBody.error.code, "invalid_query", query);
+  }
+  assert.equal(repositoryPageRequest, undefined);
+});
+
+test("rejects unsupported methods while allowing GET and POST", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/alerts`, {
+    method: "PUT",
+  });
   const responseBody = await response.json();
 
   assert.equal(response.status, 405);
-  assert.equal(response.headers.get("allow"), "POST");
+  assert.equal(response.headers.get("allow"), "GET, POST");
   assert.equal(responseBody.error.code, "method_not_allowed");
+  assert.equal(responseBody.error.message, "Use GET or POST for this route.");
 });
 
 test("returns explicit errors for unsupported media type and malformed JSON", async () => {

@@ -1,25 +1,28 @@
 # SENTINEL-X API (prototype)
 
-Prototype Node.js REST API with SQLite persistence and a WebSocket event stream.
-The initial scope is intentionally limited to one REST endpoint:
-`POST /api/v1/alerts`.
+Prototype Node.js REST API with InfluxDB 3 Core persistence and a WebSocket event stream.
+The REST API accepts alerts at `POST /api/v1/alerts` and lists them at
+`GET /api/v1/alerts`.
 
 ## Architecture
 
-Alert creation and validation are handled by `src/services/alert-service.js`:
-the HTTP server is responsible for transport concerns, while the service applies
-the alert rules, assigns a reception timestamp, and shapes the saved alert.
-The service depends on a repository contract (`save` and `close`), not on SQL
-or a database driver. SQL statements, schema creation, and SQLite access are
-isolated in `src/persistence/alert-repository.sqlite.js`.
+`src/services/alert-write-service.js` validates and creates alerts;
+`src/services/alert-read-service.js` validates pagination input and lists
+alerts. Their `createAlertWriteService` and `createAlertReadService` factories
+receive the repository as a dependency, keeping persistence details out of the
+services and allowing tests to inject a fake repository. The HTTP server
+handles transport concerns and delegates to the appropriate service.
+InfluxDB connection settings and client APIs are isolated in
+`src/persistence/influx-client.js`; alert points are written and queried by
+`src/persistence/alert-repository.influx.js`.
 `createAlertServer` accepts an `alertRepository` option for injecting another
-implementation. The default adapter continues to use `DATABASE_PATH` (or
-`.data/sentinel-x.sqlite`).
+implementation, which lets tests run without an InfluxDB server.
 
 ## Requirements
 
 - Node.js 20 or later
 - npm
+- InfluxDB 3 Core running locally or reachable over HTTP
 
 ## Start locally
 
@@ -28,20 +31,82 @@ Run all commands in this README from the `api/` directory:
 ```sh
 cd api
 npm install
+cp .env.example .env
+# Set your InfluxDB token in .env
 npm start
 ```
 
-Relative paths such as `.data/sentinel-x.sqlite` are resolved from `api/`.
+The API uses the InfluxDB 3 JavaScript client and writes with the native v3
+write endpoint. `INFLUX_HOST` defaults to `http://127.0.0.1:8181`, the default
+HTTP address for InfluxDB 3 Core. Provide an operator token in `INFLUX_TOKEN`
+and an existing database name in `INFLUX_DATABASE`. For a local instance, the
+InfluxDB CLI can create a database with
+`influxdb3 create database alerts --token '<your-token>'`. Create an operator
+token with `influxdb3 create token --admin` if the instance does not already
+have one. Tokens should be kept out of source control.
+
+The API loads `.env` automatically at startup. Set `INFLUX_TOKEN` in `.env`
+before starting it; the template in `.env.example` lists the supported names.
+Variables already exported in the environment take precedence over values in
+`.env`.
 
 By default, the API listens on `http://127.0.0.1:3000`, accepts alerts at
-`POST /api/v1/alerts`, and stores them in `.data/sentinel-x.sqlite`. WebSocket
-clients can connect to `ws://127.0.0.1:3000/ws` to receive accepted alerts.
+`POST /api/v1/alerts`, and stores each alert as a point in the configured
+InfluxDB 3 database. Its point timestamp is the alert timestamp; `device_id` and a
+generated UUID are tags, numeric measurements are written as
+`measurement_<name>` fields, and `payload_json` preserves the complete alert.
+The API waits for InfluxDB to flush each accepted alert before returning
+success. WebSocket clients can connect to `ws://127.0.0.1:3000/ws` to receive
+accepted alerts.
 
-Set `PORT`, `HOST`, or `DATABASE_PATH` to override the defaults. For example,
+Set `PORT` or `HOST` to override the server defaults. For example,
 `HOST=0.0.0.0` makes the server reachable on the local network; do this only on
 a trusted network because authentication is not implemented yet.
 
 ## Alert contract
+
+### List alerts
+
+`GET /api/v1/alerts` returns alerts in reverse chronological order. It uses
+cursor pagination so clients can walk through the history without offset-based
+pages shifting as new alerts arrive.
+
+- `limit`: optional page size; defaults to `50` and must be between `1` and
+  `100`.
+- `cursor`: optional opaque cursor returned by the previous page.
+
+The response contains a `data` array and pagination metadata. When
+`has_more` is `true`, send `next_cursor` to retrieve the next page:
+
+```sh
+curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50'
+curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50&cursor=<next_cursor>'
+```
+
+The response shape is:
+
+```json
+{
+  "data": [
+    {
+      "id": "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
+      "timestamp": "2026-10-05T12:00:00.000Z",
+      "device_id": "esp8266-demo",
+      "measurements": { "temperature_c": 21.4 },
+      "sensor_states": { "motion": false },
+      "received_at": "2026-10-05T12:00:01.000Z"
+    }
+  ],
+  "pagination": {
+    "next_cursor": "<opaque cursor or null>",
+    "has_more": false
+  }
+}
+```
+
+Invalid query parameters return `400` with the standard API error shape.
+
+### Create alerts
 
 The request body must be JSON with:
 
@@ -73,7 +138,7 @@ curl -i http://127.0.0.1:3000/api/v1/alerts \
 ```
 
 A successful request returns HTTP `201` with the saved alert, including its
-database `id` and server-side `received_at` timestamp. Invalid JSON returns
+UUID `id` and server-side `received_at` timestamp. Invalid JSON returns
 `400`; invalid fields return `422`; unsupported content types return `415`;
 oversized bodies return `413`. Errors use the shape
 `{"error":{"code":"...","message":"...","details":[]}}` (details are present
@@ -120,4 +185,13 @@ the ID returned by the API. Set `API_BASE_URL` to target another server:
 
 ```sh
 API_BASE_URL=http://127.0.0.1:3001 npm run send:alerts
+```
+
+To inspect saved rows with the InfluxDB 3 CLI, run:
+
+```sh
+influxdb3 query \
+  --database alerts \
+  --token '<your-influxdb3-token>' \
+  'SELECT * FROM alerts ORDER BY time DESC LIMIT 10'
 ```
