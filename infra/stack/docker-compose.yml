@@ -1,0 +1,85 @@
+# Stack applicative Sentinel-X — conteneurs isoles sur la borne (PC Serveur Local)
+#
+# Deux services, reseau interne : aucune sortie vers Internet, aucun port en
+# 0.0.0.0 (invariant 3 du projet). Le tableau de bord Beszel, lui, est hors
+# Docker, en binaire systemd : la supervision ne depend pas de ce qu elle surveille.
+
+name: sentinel-x
+
+services:
+
+  # --- Base temporelle -----------------------------------------------------
+  # InfluxDB 3 Core : c est LUI que le code de l API appelle (client
+  # @influxdata/influxdb3-client, ecriture en line protocol, lecture en SQL).
+  # Le choix vient du code, pas d un gout personnel.
+  influxdb3-core:
+    image: influxdb:3.11.6-core            # arm64 disponible ; version pincee
+    container_name: sentinel-influxdb
+    restart: unless-stopped
+    networks: [sentinel-core]
+    command:
+      - influxdb3
+      - serve
+      - --node-id=node0
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3/data
+    environment:
+      # En v3, DOCKER_INFLUXDB_INIT_* n existe plus : le jeton admin passe par
+      # un fichier monte en lecture seule et en 600 sur l hote.
+      INFLUXDB3_ADMIN_TOKEN_FILE: /run/secrets/admin-token
+    # Aucun port publie : la base vit sur le reseau interne. L administration
+    # passe par "docker compose exec influxdb3-core influxdb3 ...".
+    volumes:
+      - influxdb3-data:/var/lib/influxdb3/data
+      - ./secrets/admin-token.json:/run/secrets/admin-token:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # --- API -----------------------------------------------------------------
+  api:
+    build:
+      context: ..                          # parent de stack/ : contient api/ et stack/
+      dockerfile: stack/api/Dockerfile
+    image: sentinel-api:1.0.0
+    container_name: sentinel-api
+    restart: unless-stopped
+    networks: [sentinel-core, sentinel-edge]
+    depends_on:
+      - influxdb3-core
+    environment:
+      NODE_ENV: production
+      # Piege n 5 : dans le conteneur il faut ecouter sur 0.0.0.0, sinon rien
+      # n est relais. L exposition, elle, reste restreinte par les ports.
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      INFLUX_HOST: http://influxdb3-core:8181
+      INFLUX_DATABASE: "${INFLUX_DATABASE:-alerts}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:?variable INFLUX_TOKEN absente du .env}"
+    ports:
+      - "127.0.0.1:3000:3000"              # administration et dashboard local
+      - "10.73.42.1:3000:3000"             # ingestion par les ESP8266 depuis uap0
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+networks:
+  # Reseau ETANCHE entre l API et la base : aucun trafic sortant, et surtout
+  # aucun port publie. La base n est joignable que par l API.
+  sentinel-core:
+    internal: true
+
+  # Reseau d accroche reserve a l exposition : Docker refuse de publier un port
+  # depuis un reseau internal, d ou ce second bridge.
+  sentinel-edge:
+
+volumes:
+  influxdb3-data:
