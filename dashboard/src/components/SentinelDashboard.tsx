@@ -1,5 +1,4 @@
-import { useCallback, useState } from "react";
-import type { ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,40 +13,98 @@ import DashboardSidebar from "./dashboard/DashboardSidebar";
 import EnvironmentalCharts from "./dashboard/EnvironmentalCharts";
 import KpiCard from "./dashboard/KpiCard";
 
+const AI_SERVER = "http://127.0.0.1:5001";
+
+interface Detection {
+  class: string;
+  confidence: number;
+  bbox: {
+    x1: number;
+    x2: number;
+    y1: number;
+    y2: number;
+  };
+}
+
+interface DetectionResponse {
+  count: number;
+  detections: Detection[];
+  fps?: number;
+  latency_ms?: number;
+  performance?: string;
+  resolution?: {
+    width: number;
+    height: number;
+  };
+}
+
 export default function SentinelDashboard(): ReactElement {
-
-  const [personCount, setPersonCount] = useState(0);
-  const [confidence, setConfidence] = useState(0);
   const [aiConnected, setAiConnected] = useState(false);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [latency, setLatency] = useState<number | null>(null);
 
-  const handleDetectionChange = useCallback(
-    (
-      count: number,
-      detectionConfidence: number,
-      connected: boolean
-    ) => {
-      setPersonCount(count);
-      setConfidence(detectionConfidence);
-      setAiConnected(connected);
-    },
-    []
-  );
+  useEffect(() => {
+    const getAIStatus = async () => {
+      try {
+        const response = await fetch(`${AI_SERVER}/detections`);
 
-  const detectionValue = !aiConnected
+        if (!response.ok) {
+          throw new Error("Serveur YOLO indisponible");
+        }
+
+        const data: DetectionResponse = await response.json();
+
+        setAiConnected(true);
+        setDetections(data.detections || []);
+
+        if (typeof data.latency_ms === "number") {
+          setLatency(data.latency_ms);
+        }
+      } catch (error) {
+        console.error("Erreur connexion YOLO :", error);
+
+        setAiConnected(false);
+        setDetections([]);
+        setLatency(null);
+      }
+    };
+
+    getAIStatus();
+
+    const interval = setInterval(getAIStatus, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const personCount = detections.length;
+
+  const confidence =
+    personCount > 0
+      ? Math.round(
+          Math.max(
+            ...detections.map((detection) => detection.confidence)
+          ) * 100
+        )
+      : 0;
+
+  const aiValue = !aiConnected
     ? "IA déconnectée"
     : personCount > 0
       ? `${personCount} intrus détecté${personCount > 1 ? "s" : ""}`
       : "Aucun intrus";
 
-  const detectionSubtext = !aiConnected
+  const aiSubtext = !aiConnected
     ? "Serveur YOLO indisponible"
     : personCount > 0
-      ? `YOLOv8 • Confiance: ${confidence}%`
-      : "YOLOv8 • Surveillance active";
+      ? `YOLOv8n • Confiance: ${confidence}%${
+          latency !== null ? ` • ${Math.round(latency)}ms` : ""
+        }`
+      : `YOLOv8n • Surveillance active${
+          latency !== null ? ` • ${Math.round(latency)}ms` : ""
+        }`;
 
   return (
     <div className="dark min-h-screen bg-black text-neutral-300 font-sans flex">
-
       <DashboardSidebar />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -79,16 +136,18 @@ export default function SentinelDashboard(): ReactElement {
             iconColor="text-amber-500"
           />
 
-          {/* KPI IA DYNAMIQUE */}
+          {/* KPI VISION IA */}
           <KpiCard
             title="Détection IA"
-            value={detectionValue}
-            subtext={detectionSubtext}
+            value={aiValue}
+            subtext={aiSubtext}
             icon={Activity}
             iconColor={
-              personCount > 0
+              !aiConnected
                 ? "text-red-500"
-                : "text-emerald-500"
+                : personCount > 0
+                  ? "text-red-500"
+                  : "text-emerald-500"
             }
           />
 
@@ -102,7 +161,11 @@ export default function SentinelDashboard(): ReactElement {
             }
             subtext={
               personCount > 0
-                ? `${personCount} personne détectée • ${confidence}%`
+                ? `${personCount} personne${
+                    personCount > 1 ? "s" : ""
+                  } détectée${
+                    personCount > 1 ? "s" : ""
+                  } • ${confidence}%`
                 : "Aucune alerte active"
             }
             icon={AlertTriangle}
@@ -113,22 +176,15 @@ export default function SentinelDashboard(): ReactElement {
             }
             alert={personCount > 0}
           />
-
         </section>
 
         {/* CONTENU */}
         <section className="flex-1 flex overflow-hidden">
-
-          <CameraPanel
-            onDetectionChange={handleDetectionChange}
-          />
-
+          <CameraPanel />
           <EnvironmentalCharts />
-
         </section>
 
         <DashboardFooter />
-
       </main>
     </div>
   );

@@ -18,21 +18,28 @@ interface Detection {
 interface DetectionResponse {
   count: number;
   detections: Detection[];
+  latency_ms: number;
+  fps: number;
+  performance: "OK" | "SLOW";
+  resolution: {
+    width: number;
+    height: number;
+  };
 }
 
-interface CameraPanelProps {
-  onDetectionChange?: (
-    count: number,
-    confidence: number,
-    connected: boolean
-  ) => void;
-}
-
-export default function CameraPanel({
-  onDetectionChange,
-}: CameraPanelProps) {
+export default function CameraPanel() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [connected, setConnected] = useState(false);
+
+  const [latency, setLatency] = useState(0);
+  const [fps, setFps] = useState(0);
+
+  const [resolution, setResolution] = useState({
+    width: 640,
+    height: 480,
+  });
+
+  const [performance, setPerformance] = useState<"OK" | "SLOW">("OK");
 
   useEffect(() => {
     const getDetections = async () => {
@@ -45,29 +52,22 @@ export default function CameraPanel({
 
         const data: DetectionResponse = await response.json();
 
+        console.log("YOLO :", data);
+
         setDetections(data.detections);
+
+        setLatency(data.latency_ms);
+        setFps(data.fps);
+
+        setResolution(data.resolution);
+
+        setPerformance(data.performance);
+
         setConnected(true);
-
-        const count = data.detections.length;
-
-        const confidence =
-          count > 0
-            ? Math.round(
-                Math.max(
-                  ...data.detections.map(
-                    (detection) => detection.confidence
-                  )
-                ) * 100
-              )
-            : 0;
-
-        onDetectionChange?.(count, confidence, true);
       } catch (error) {
         console.error("Erreur connexion YOLO :", error);
 
         setConnected(false);
-
-        onDetectionChange?.(0, 0, false);
       }
     };
 
@@ -76,7 +76,7 @@ export default function CameraPanel({
     const interval = setInterval(getDetections, 500);
 
     return () => clearInterval(interval);
-  }, [onDetectionChange]);
+  }, []);
 
   const personCount = detections.length;
 
@@ -94,79 +94,125 @@ export default function CameraPanel({
   return (
     <section className="flex-1 min-w-0 border-r border-neutral-800 p-4 flex flex-col">
 
+      {/* HEADER */}
       <div className="flex justify-between items-center mb-3">
+
         <h2 className="text-white text-sm font-semibold">
           Caméra USB - Zone 3 (Entrée Est)
         </h2>
 
-        <span className="text-neutral-500 text-xs">
-          AI Vision • YOLOv8 • 15fps
-        </span>
+        <div className="flex items-center gap-3 text-xs">
+
+          <span className="text-neutral-500">
+            AI Vision • YOLOv8n
+          </span>
+
+          {connected ? (
+            <Badge className="bg-emerald-500 text-black">
+              CONNECTÉE
+            </Badge>
+          ) : (
+            <Badge variant="destructive">
+              DÉCONNECTÉE
+            </Badge>
+          )}
+
+        </div>
+
       </div>
 
+      {/* VIDEO */}
       <Card className="relative flex-1 min-h-0 rounded-none border border-neutral-800 bg-black p-0 overflow-hidden">
 
         <div className="w-full h-full flex items-center justify-center">
+
           <img
             src={`${AI_SERVER}/video`}
             alt="Caméra avec détection YOLO"
             className="w-full h-full object-contain"
           />
+
         </div>
 
-        {/* STATUT IA */}
+        {/* STATUS IA */}
         <div className="absolute top-3 left-3">
-          {connected ? (
+
+          {performance === "OK" ? (
+
             <Badge className="bg-emerald-500 text-black">
-              AI CONNECTÉE
+              AI OK • {latency.toFixed(0)} ms
             </Badge>
+
           ) : (
-            <Badge variant="destructive">
-              AI DÉCONNECTÉE
+
+            <Badge className="bg-amber-500 text-black">
+              AI LENTE • {latency.toFixed(0)} ms
             </Badge>
+
           )}
+
         </div>
 
-        {/* DÉTECTION */}
+        {/* DETECTION */}
         <div className="absolute top-3 right-3">
+
           {personCount > 0 ? (
+
             <Badge variant="destructive">
+
               {personCount} PERSONNE
-              {personCount > 1 ? "S" : ""} • {confidence}%
+              {personCount > 1 ? "S" : ""}
+
+              {" • "}
+
+              {confidence}%
+
             </Badge>
+
           ) : (
+
             <Badge className="bg-emerald-500 text-black">
+
               AUCUNE PERSONNE
+
             </Badge>
+
           )}
+
         </div>
 
-        {/* INFORMATIONS BAS */}
+        {/* INFORMATIONS VIDEO */}
         <div className="absolute bottom-3 left-3 flex gap-3 text-xs font-mono text-emerald-400">
 
           <Badge className="bg-red-600 text-white">
             REC
           </Badge>
 
-          <span>YOLOv8</span>
+          <span>
+            YOLOv8n
+          </span>
 
           <span>
-            {personCount} détection
-            {personCount > 1 ? "s" : ""}
+            {resolution.width}×{resolution.height}
+          </span>
+
+          <span>
+            {fps.toFixed(1)} FPS
           </span>
 
         </div>
 
       </Card>
 
+      {/* INFORMATIONS */}
       <div className="flex justify-between mt-2 text-[10px] text-neutral-500 font-mono">
 
         <span>
-          Source: /dev/video0 • USB • ID: CAM-ENT-03
+          Source: USB • CAM-ENT-03
         </span>
 
         <span>
-          AI: YOLOv8 • Conf: {confidence}%
+          Latency: {latency.toFixed(2)} ms
         </span>
 
       </div>
