@@ -1,5 +1,31 @@
+# Node.js
 node_modules/
+
+# Data / local data
 .data/
+
+# Environment variables
 .env*
+
+# macOS
 .DS_Store
+
+# Firmware secrets
 firmware/include/secrets.h
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
