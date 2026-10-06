@@ -1,0 +1,30 @@
+# Garder ce fichier a jour : il est la SEULE barriere contre une fuite de secrets.
+
+# Secrets / mots de passe locaux
+.env
+.env.*
+!.env.example
+*password*
+*passwd*
+*.key
+*.pem
+*.p12
+*.pfx
+*token*
+
+# Certificats (la CA privee et le cert serveur ne quittent jamais le RPi)
+*.crt
+*.csr
+certs/
+ca.*
+
+# Donnees d'execution
+data/
+log/
+*.log
+
+# Specifique OS / editeur
+.DS_Store
+.vscode/
+*.swp
+Thumbs.db
