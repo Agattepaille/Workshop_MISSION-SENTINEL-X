@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { afterEach, beforeEach, test } from "node:test";
 import WebSocket from "ws";
 import { createAlertServer } from "../src/server.js";
@@ -23,11 +23,25 @@ let websocketUrl;
 let sockets;
 let storedAlerts;
 let repositoryPageRequest;
+let mqttCommandClient;
+let publishedCommands;
+let deviceStatuses;
 
 beforeEach(async () => {
   storedAlerts = new Map();
   repositoryPageRequest = undefined;
+  publishedCommands = [];
+  deviceStatuses = new Map();
+  mqttCommandClient = new EventEmitter();
+  mqttCommandClient.connected = true;
+  mqttCommandClient.publishCommand = async (command) => {
+    publishedCommands.push(command);
+  };
+  mqttCommandClient.getDeviceStatus = (deviceId) =>
+    deviceStatuses.get(deviceId) ?? null;
+  mqttCommandClient.close = async () => {};
   app = createAlertServer({
+    mqttCommandClient,
     alertRepository: {
       async save(alert, receivedAt, id) {
         storedAlerts.set(id, {
@@ -125,6 +139,7 @@ test("rejects null measurement and sensor-state objects", async () => {
 test("returns an error and does not broadcast when persistence fails", async () => {
   await app.close();
   app = createAlertServer({
+    mqttCommandClient,
     alertRepository: {
       async save() {
         throw new Error("InfluxDB unavailable");
@@ -215,4 +230,117 @@ test("returns explicit errors for unsupported media type and malformed JSON", as
   );
   assert.equal(malformedJson.status, 400);
   assert.equal((await malformedJson.json()).error.code, "invalid_json");
+});
+
+test("accepts a command, publishes it and exposes its current state", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+    }),
+  });
+  const body = await response.json();
+  const commandId = body.data.command_id;
+
+  assert.equal(response.status, 202);
+  assert.equal(body.data.status, "pending");
+  assert.match(commandId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(publishedCommands[0], {
+    deviceId: "esp8266-demo",
+    payload: {
+      command_id: commandId,
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+      duration_ms: 5000,
+    },
+  });
+
+  const statusResponse = await fetch(`${baseUrl}/api/v1/commands/${commandId}`);
+  assert.equal(statusResponse.status, 200);
+  assert.equal((await statusResponse.json()).data.status, "pending");
+});
+
+test("rejects invalid commands and does not publish them", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+      duration_ms: 60_000,
+    }),
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).error.code, "validation_failed");
+  assert.equal(publishedCommands.length, 0);
+});
+
+test("returns an explicit service-unavailable error when MQTT publish fails", async () => {
+  mqttCommandClient.publishCommand = async () => {
+    throw new Error("broker offline");
+  };
+
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "leds.auto",
+    }),
+  });
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "mqtt_unavailable");
+});
+
+test("broadcasts device command acknowledgements and reports device status", async () => {
+  const socket = await connectWebSocket();
+  const pendingNotificationPromise = once(socket, "message");
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "leds.test",
+    }),
+  });
+  const command = (await response.json()).data;
+  const [pendingMessage] = await pendingNotificationPromise;
+  const pendingNotification = JSON.parse(pendingMessage.toString());
+  const notificationPromise = once(socket, "message");
+
+  assert.equal(pendingNotification.type, "command.updated");
+  assert.equal(pendingNotification.data.command_id, command.command_id);
+  assert.equal(pendingNotification.data.status, "pending");
+
+  mqttCommandClient.emit("command-result", {
+    deviceId: "esp8266-demo",
+    payload: {
+      command_id: command.command_id,
+      status: "completed",
+    },
+  });
+  const [message] = await notificationPromise;
+  const notification = JSON.parse(message.toString());
+
+  assert.equal(notification.type, "command.updated");
+  assert.equal(notification.data.command_id, command.command_id);
+  assert.equal(notification.data.status, "completed");
+
+  deviceStatuses.set("esp8266-demo", {
+    online: true,
+    received_at: "2026-10-06T10:00:00.000Z",
+  });
+  const statusResponse = await fetch(
+    `${baseUrl}/api/v1/devices/esp8266-demo/status`,
+  );
+  assert.deepEqual((await statusResponse.json()).data, {
+    device_id: "esp8266-demo",
+    status: "online",
+    received_at: "2026-10-06T10:00:00.000Z",
+    mqtt_connected: true,
+  });
 });

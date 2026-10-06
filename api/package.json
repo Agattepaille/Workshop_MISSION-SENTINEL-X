@@ -14,6 +14,7 @@
   "dependencies": {
     "@influxdata/influxdb3-client": "^2.4.0",
     "dotenv": "^18.0.5",
+    "mqtt": "^5.10.4",
     "ws": "^8.18.3"
   }
 }
