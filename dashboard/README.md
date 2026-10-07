@@ -16,13 +16,26 @@ npm run dev
 ```
 
 The Vite development proxy forwards `/api` requests and `/ws` WebSocket
-connections to the API at `http://127.0.0.1:3000`. The dashboard loads the
-latest 50 alerts when it starts, then listens for new `alert.created` events.
-If the WebSocket reconnects, it reloads the alert list to catch up.
+connections to the API at `http://127.0.0.1:3000`. The dashboard requests alerts from the last 12 hours using ISO 8601 UTC
+`since`/`to` parameters based on measurement timestamps, then listens for new
+`alert.created` events. If the WebSocket reconnects, it requests a fresh
+12-hour range to catch up.
 
 The Vite proxy only applies during development. In production, configure the
 web server or reverse proxy to forward `/api` and `/ws` to the API, including
 WebSocket upgrades.
+
+## Command controls
+
+Copy `.env.example` to `.env` and set the monitored equipment IDs for each
+action. `VITE_BUZZER_DEVICE_ID`, `VITE_LEDS_TEST_DEVICE_ID`, and
+`VITE_LEDS_AUTO_DEVICE_ID` are sent as `device_id` in the corresponding API
+request. These identify the monitored equipment, not the ESP8266 MQTT gateway.
+The LEDs test and automatic-mode actions may use the same equipment ID.
+
+The frontend contains no MQTT credentials and never connects to the broker
+directly. Vite environment values are embedded in the built frontend, so these
+IDs must not contain secrets.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
@@ -39,7 +52,7 @@ The React Compiler is not enabled on this template because of its impact on dev 
 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
 
-```
+````
 
 ## UI components
 
@@ -76,34 +89,33 @@ export default defineConfig([
   },
 ])
 
-```
+````
 
 You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
 
 ```js
 // eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+import reactX from "eslint-plugin-react-x";
+import reactDom from "eslint-plugin-react-dom";
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(["dist"]),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ["**/*.{ts,tsx}"],
     extends: [
       // Other configs...
       // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
+      reactX.configs["recommended-typescript"],
       // Enable lint rules for React DOM
       reactDom.configs.recommended,
     ],
     languageOptions: {
       parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        project: ["./tsconfig.node.json", "./tsconfig.app.json"],
         tsconfigRootDir: import.meta.dirname,
       },
       // other options...
     },
   },
-])
-
+]);
 ```

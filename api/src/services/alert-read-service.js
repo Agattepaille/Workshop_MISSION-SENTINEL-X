@@ -84,13 +84,65 @@ function parseCursor(value) {
   };
 }
 
+function parseTimestamp(value, field) {
+  const invalidTimestamp = () =>
+    invalidParameter(field, "Timestamp must be an ISO 8601 UTC timestamp.");
+  if (typeof value !== "string") throw invalidTimestamp();
+
+  const timestamp = new Date(value);
+  if (
+    !Number.isFinite(timestamp.getTime()) ||
+    timestamp.toISOString() !== value
+  ) {
+    throw invalidTimestamp();
+  }
+  return timestamp.toISOString();
+}
+
+function parseTimeRange(since, to) {
+  if (since === undefined && to === undefined) return undefined;
+  if (since === undefined) {
+    throw invalidParameter("since", "Both since and to are required.");
+  }
+  if (to === undefined) {
+    throw invalidParameter("to", "Both since and to are required.");
+  }
+
+  const from = parseTimestamp(since, "since");
+  const until = parseTimestamp(to, "to");
+  if (from > until) {
+    throw invalidParameter("since", "Since must not be later than to.");
+  }
+  return { from, to: until };
+}
+
 function encodeCursor(cursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
 export function createAlertReadService({ alertRepository }) {
   return {
-    async list({ limit, cursor } = {}) {
+    async list({ limit, cursor, since, to } = {}) {
+      const timeRange = parseTimeRange(since, to);
+      if (timeRange !== undefined) {
+        if (limit !== undefined || cursor !== undefined) {
+          throw invalidParameter(
+            "since",
+            "Time ranges cannot be combined with limit or cursor.",
+          );
+        }
+
+        const data = await alertRepository.listBetween(timeRange);
+
+        return {
+          data,
+          pagination: {
+            next_cursor: null,
+            has_more: false,
+          },
+        };
+      }
+
       const page = await alertRepository.listPage({
         limit: parseLimit(limit),
         cursor: parseCursor(cursor),
