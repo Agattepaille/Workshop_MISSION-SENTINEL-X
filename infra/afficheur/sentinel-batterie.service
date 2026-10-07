@@ -1,0 +1,24 @@
+[Unit]
+# Surveillance de la carte d alimentation et arret propre si la batterie devient
+# critique de facon durable.
+#
+# Separe volontairement de l afficheur : celui-ci peut etre arrete ou en panne,
+# la protection doit continuer. Il lit un etat en memoire (/run), jamais le bus
+# I2C directement, pour ne pas se marcher sur les pieds avec l autre service.
+Description=Protection batterie de la borne (arret propre si critique)
+After=sentinel-afficheur.service
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sentinel-afficheur
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/sentinel-afficheur/batterie.py
+Restart=on-failure
+RestartSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
