@@ -4,6 +4,16 @@ import { Card } from "@/components/ui/card";
 
 const AI_SERVER = "http://127.0.0.1:5001";
 
+type ServiceStatus = "connecting" | "connected" | "disconnected";
+type CameraStatus = "starting" | "active" | "unavailable" | "error";
+
+export interface CameraDetectionSummary {
+  serviceStatus: ServiceStatus;
+  cameraStatus: CameraStatus;
+  count: number;
+  confidence: number;
+}
+
 interface Detection {
   class: string;
   confidence: number;
@@ -16,69 +26,62 @@ interface Detection {
 }
 
 interface DetectionResponse {
-  camera_status: CameraStatus;
+  camera_status?: CameraStatus;
   count: number;
   detections: Detection[];
-}
-
-type CameraStatus = "starting" | "active" | "unavailable" | "error";
-type ServiceStatus = "connecting" | "connected" | "disconnected";
-
-export interface CameraDetectionSummary {
-  serviceStatus: ServiceStatus;
-  cameraStatus: CameraStatus;
-  count: number;
-  confidence: number;
-}
-
-interface CameraPanelProps {
-  onDetectionChange?: (summary: CameraDetectionSummary) => void;
+  latency_ms: number;
+  fps: number;
+  performance: "OK" | "SLOW";
+  resolution: {
+    width: number;
+    height: number;
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isCameraStatus(value: unknown): value is CameraStatus {
-  return (
-    value === "starting" ||
-    value === "active" ||
-    value === "unavailable" ||
-    value === "error"
-  );
+  return typeof value === "object" && value !== null;
 }
 
 function isDetection(value: unknown): value is Detection {
-  if (
-    !isRecord(value) ||
-    typeof value.class !== "string" ||
-    typeof value.confidence !== "number" ||
-    !Number.isFinite(value.confidence) ||
-    !isRecord(value.bbox)
-  ) {
+  if (!isRecord(value) || !isRecord(value.bbox)) {
     return false;
   }
 
-  const bbox = value.bbox;
-  return ["x1", "x2", "y1", "y2"].every((coordinate) => {
-    const valueAtCoordinate = bbox[coordinate];
-    return (
-      typeof valueAtCoordinate === "number" &&
-      Number.isFinite(valueAtCoordinate)
-    );
-  });
+  return (
+    typeof value.class === "string" &&
+    typeof value.confidence === "number" &&
+    typeof value.bbox.x1 === "number" &&
+    typeof value.bbox.x2 === "number" &&
+    typeof value.bbox.y1 === "number" &&
+    typeof value.bbox.y2 === "number"
+  );
 }
 
 function isDetectionResponse(value: unknown): value is DetectionResponse {
+  if (!isRecord(value) || !isRecord(value.resolution)) {
+    return false;
+  }
+
+  const cameraStatus = value.camera_status;
   return (
-    isRecord(value) &&
-    isCameraStatus(value.camera_status) &&
     typeof value.count === "number" &&
-    Number.isInteger(value.count) &&
     Array.isArray(value.detections) &&
     value.detections.every(isDetection) &&
-    value.count === value.detections.length
+    typeof value.latency_ms === "number" &&
+    typeof value.fps === "number" &&
+    (value.performance === "OK" || value.performance === "SLOW") &&
+    typeof value.resolution.width === "number" &&
+    typeof value.resolution.height === "number" &&
+    (cameraStatus === undefined ||
+      cameraStatus === "starting" ||
+      cameraStatus === "active" ||
+      cameraStatus === "unavailable" ||
+      cameraStatus === "error")
   );
+}
+
+interface CameraPanelProps {
+  onDetectionChange: (summary: CameraDetectionSummary) => void;
 }
 
 export default function CameraPanel({
@@ -89,8 +92,17 @@ export default function CameraPanel({
     useState<ServiceStatus>("connecting");
   const [cameraStatus, setCameraStatus] =
     useState<CameraStatus>("starting");
+  const [latency, setLatency] = useState(0);
+  const [fps, setFps] = useState(0);
+  const [resolution, setResolution] = useState({
+    width: 640,
+    height: 480,
+  });
+  const [performance, setPerformance] = useState<"OK" | "SLOW">("OK");
 
   useEffect(() => {
+    let mounted = true;
+
     const getDetections = async () => {
       try {
         const response = await fetch(`${AI_SERVER}/detections`);
@@ -106,63 +118,72 @@ export default function CameraPanel({
           throw new Error("Le service IA a renvoyé un état de caméra invalide.");
         }
 
-        setServiceStatus("connected");
-        setCameraStatus(payload.camera_status);
+        if (!mounted) {
+          return;
+        }
 
-        const currentDetections =
-          payload.camera_status === "active" ? payload.detections : [];
-        setDetections(currentDetections);
-
+        const nextCameraStatus = payload.camera_status ?? "active";
         const confidence =
-          currentDetections.length > 0
+          payload.detections.length > 0
             ? Math.round(
                 Math.max(
-                  ...currentDetections.map((detection) => detection.confidence),
-                ) * 100
+                  ...payload.detections.map(
+                    (detection) => detection.confidence,
+                  ),
+                ) * 100,
               )
             : 0;
 
-        onDetectionChange?.({
+        setDetections(payload.detections);
+        setLatency(payload.latency_ms);
+        setFps(payload.fps);
+        setResolution(payload.resolution);
+        setPerformance(payload.performance);
+        setServiceStatus("connected");
+        setCameraStatus(nextCameraStatus);
+        onDetectionChange({
           serviceStatus: "connected",
-          cameraStatus: payload.camera_status,
-          count: currentDetections.length,
+          cameraStatus: nextCameraStatus,
+          count: payload.detections.length,
           confidence,
         });
       } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
         console.error("Erreur connexion YOLO :", error);
-
-        setServiceStatus("disconnected");
-        setCameraStatus("unavailable");
         setDetections([]);
-
-        onDetectionChange?.({
+        setLatency(0);
+        setFps(0);
+        setServiceStatus("disconnected");
+        onDetectionChange({
           serviceStatus: "disconnected",
-          cameraStatus: "unavailable",
+          cameraStatus,
           count: 0,
           confidence: 0,
         });
       }
     };
 
-    getDetections();
+    void getDetections();
+    const interval = setInterval(() => void getDetections(), 1000);
 
-    const interval = setInterval(getDetections, 500);
-
-    return () => clearInterval(interval);
-  }, [onDetectionChange]);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [cameraStatus, onDetectionChange]);
 
   const cameraActive =
     serviceStatus === "connected" && cameraStatus === "active";
   const personCount = detections.length;
-
   const confidence =
     personCount > 0
       ? Math.round(
           Math.max(
-            ...detections.map(
-              (detection) => detection.confidence
-            )
-          ) * 100
+            ...detections.map((detection) => detection.confidence),
+          ) * 100,
         )
       : 0;
   const statusMessage =
@@ -183,60 +204,48 @@ export default function CameraPanel({
     cameraStatus === "error";
 
   return (
-    <section className="flex-1 min-w-0 border-r border-neutral-800 p-4 flex flex-col">
-
-      <div className="flex justify-between items-center mb-3">
-        <h2 className="text-white text-sm font-semibold">
+    <section className="flex min-w-0 flex-1 flex-col border-r border-neutral-800 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-white">
           Caméra USB - Zone 3 (Entrée Est)
         </h2>
-
-        <span className="text-neutral-500 text-xs">
-          AI Vision • YOLOv8 • 15fps
-        </span>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-neutral-500">AI Vision • YOLOv8n</span>
+          {serviceStatus === "connected" ? (
+            <Badge className="bg-emerald-500 text-black">CONNECTÉE</Badge>
+          ) : (
+            <Badge variant="destructive">
+              {serviceStatus === "connecting" ? "CONNEXION…" : "DÉCONNECTÉE"}
+            </Badge>
+          )}
+        </div>
       </div>
 
-      <Card className="relative flex-1 min-h-0 rounded-none border border-neutral-800 bg-black p-0 overflow-hidden">
-
-        <div className="w-full h-full flex items-center justify-center">
+      <Card className="relative min-h-0 flex-1 overflow-hidden rounded-none border border-neutral-800 bg-black p-0">
+        <div className="flex h-full w-full items-center justify-center">
           <img
             src={`${AI_SERVER}/video`}
-            alt="Caméra avec détection YOLO"
-            className="w-full h-full object-contain"
+            alt="Flux vidéo de la caméra avec détection YOLO"
+            className="h-full w-full object-contain"
           />
         </div>
 
-        {/* STATUT IA */}
-        <div className="absolute top-3 left-3">
-          {cameraActive ? (
+        <div className="absolute left-3 top-3">
+          {performance === "OK" ? (
             <Badge className="bg-emerald-500 text-black">
-              AI CONNECTÉE
-            </Badge>
-          ) : serviceStatus === "connecting" ||
-            (serviceStatus === "connected" && cameraStatus === "starting") ? (
-            <Badge className="bg-amber-400 text-black">
-              INITIALISATION
+              AI OK • {latency.toFixed(0)} ms
             </Badge>
           ) : (
-            <Badge variant="destructive">
-              {serviceStatus === "disconnected"
-                ? "SERVICE IA HORS LIGNE"
-                : cameraStatus === "error"
-                  ? "ERREUR DE DÉTECTION"
-                  : "CAMÉRA INDISPONIBLE"}
+            <Badge className="bg-amber-500 text-black">
+              AI LENTE • {latency.toFixed(0)} ms
             </Badge>
           )}
         </div>
 
-        {/* DÉTECTION */}
-        <div className="absolute top-3 right-3">
-          {!cameraActive ? (
-            <Badge variant="outline" className="border-amber-400 text-amber-300">
-              DÉTECTION INDISPONIBLE
-            </Badge>
-          ) : personCount > 0 ? (
+        <div className="absolute right-3 top-3">
+          {personCount > 0 ? (
             <Badge variant="destructive">
-              {personCount} PERSONNE
-              {personCount > 1 ? "S" : ""} • {confidence}%
+              {personCount} PERSONNE{personCount > 1 ? "S" : ""} • {confidence}%
             </Badge>
           ) : (
             <Badge className="bg-emerald-500 text-black">
@@ -245,51 +254,33 @@ export default function CameraPanel({
           )}
         </div>
 
+        <div className="absolute bottom-3 left-3 flex gap-3 font-mono text-xs text-emerald-400">
+          {cameraActive && (
+            <Badge className="bg-red-600 text-white">REC</Badge>
+          )}
+          <span>YOLOv8n</span>
+          <span>
+            {resolution.width}×{resolution.height}
+          </span>
+          <span>{fps.toFixed(1)} FPS</span>
+        </div>
+
         {statusMessage && (
           <div
-            className={`absolute left-1/2 top-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 border p-4 text-center text-sm ${
-              statusIsError
-                ? "border-red-900 bg-black/90 text-red-300"
-                : "border-amber-700 bg-black/90 text-amber-200"
+            className={`absolute inset-x-3 bottom-12 rounded bg-black/80 p-3 text-sm ${
+              statusIsError ? "text-red-300" : "text-neutral-300"
             }`}
             role={statusIsError ? "alert" : "status"}
-            aria-live="polite"
           >
             {statusMessage}
           </div>
         )}
-
-        {/* INFORMATIONS BAS */}
-        <div className="absolute bottom-3 left-3 flex gap-3 text-xs font-mono text-emerald-400">
-          {cameraActive && (
-            <Badge className="bg-red-600 text-white">REC</Badge>
-          )}
-
-          <span>YOLOv8</span>
-
-          <span>
-            {personCount} détection
-            {personCount > 1 ? "s" : ""}
-          </span>
-
-        </div>
-
       </Card>
 
-      <div className="flex justify-between mt-2 text-[10px] text-neutral-500 font-mono">
-
-        <span>
-          Source: /dev/video0 • USB • ID: CAM-ENT-03
-        </span>
-
-        <span>
-          {cameraActive
-            ? `AI: YOLOv8 • Conf: ${confidence}%`
-            : "Détection inactive"}
-        </span>
-
+      <div className="mt-2 flex justify-between font-mono text-[10px] text-neutral-500">
+        <span>Source: USB • CAM-ENT-03</span>
+        <span>Latence : {latency.toFixed(2)} ms</span>
       </div>
-
     </section>
   );
 }

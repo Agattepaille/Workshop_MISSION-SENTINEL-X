@@ -3,20 +3,28 @@ import type { EnvironmentalAlert } from "./dashboardData";
 
 interface EnvironmentalChartsProps {
   history: EnvironmentalAlert[];
+  onPeriodChange: (range: "12h" | "24h" | "7d") => Promise<void>;
   loading: boolean;
   error: string | null;
 }
 
 const KNOWN_LABELS: Record<string, string> = {
   battery_v: "Tension batterie",
+  distanceCm: "Distance",
+  gasRaw: "Gaz (valeur brute)",
   gas_ppm: "Gaz",
+  humidity: "Humidité",
   humidity_pct: "Humidité",
   light_lux: "Luminosité",
   soil_moisture_pct: "Humidité du sol",
+  temperature: "Température",
   temperature_c: "Température",
 };
 
 function getUnit(measurement: string): string {
+  if (measurement === "temperature") return "°C";
+  if (measurement === "humidity") return "%";
+  if (measurement === "distanceCm") return "cm";
   if (measurement.endsWith("_c")) return "°C";
   if (measurement.endsWith("_pct")) return "%";
   if (measurement.endsWith("_ppm")) return "ppm";
@@ -36,6 +44,7 @@ function getLabel(measurement: string): string {
 
 export default function EnvironmentalCharts({
   history,
+  onPeriodChange,
   loading,
   error,
 }: EnvironmentalChartsProps) {
@@ -61,6 +70,7 @@ export default function EnvironmentalCharts({
                 title={getLabel(measurement)}
                 unit={getUnit(measurement)}
                 points={points}
+                onPeriodChange={onPeriodChange}
               />
             );
           })}

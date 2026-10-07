@@ -1,5 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
-import type { ReactElement } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState, type ReactElement } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,12 +13,20 @@ import CameraPanel, {
 } from "./dashboard/CameraPanel";
 import DashboardControls from "./dashboard/DashboardControls";
 import DashboardFooter from "./dashboard/DashboardFooter";
-import EnvironmentalCharts from "./dashboard/EnvironmentalCharts";
 import KpiCard from "./dashboard/KpiCard";
+import {
+  commandTargets,
+  configuredDeviceIds,
+} from "../config/deviceCommandTargets";
+import { useDeviceCommands } from "../hooks/useDeviceCommands";
 
 const numberFormat = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 2,
 });
+
+const EnvironmentalCharts = lazy(
+  () => import("./dashboard/EnvironmentalCharts"),
+);
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString("fr-FR");
@@ -33,7 +40,25 @@ export default function SentinelDashboard(): ReactElement {
       count: 0,
       confidence: 0,
     });
-  const { alerts, loading, error, connectionStatus } = useAlerts();
+  const {
+    alerts,
+    chartAlerts,
+    loadChartHistory,
+    loading,
+    error,
+    connectionStatus,
+    deviceStatuses,
+    deviceStatusError,
+    commandUpdates,
+  } = useAlerts(configuredDeviceIds);
+  const {
+    commands,
+    latestCommand,
+    submittingActions,
+    error: commandError,
+    statusError,
+    sendCommand,
+  } = useDeviceCommands(commandUpdates, connectionStatus);
 
   const handleDetectionChange = useCallback(
     (summary: CameraDetectionSummary) => setCameraDetection(summary),
@@ -41,14 +66,21 @@ export default function SentinelDashboard(): ReactElement {
   );
 
   const latestAlert = alerts[0];
-  const measurements = latestAlert?.measurements;
+  const latestMeasurementAlert = (name: string) =>
+    alerts.find((alert) => typeof alert.measurements[name] === "number");
+  const temperatureAlert = latestMeasurementAlert("temperature");
+  const humidityAlert = latestMeasurementAlert("humidity");
+  const gasAlert = latestMeasurementAlert("gasRaw");
+  const temperature = temperatureAlert?.measurements.temperature;
+  const humidity = humidityAlert?.measurements.humidity;
+  const gasRaw = gasAlert?.measurements.gasRaw;
   const chartHistory = useMemo(
     () =>
-      alerts.map(({ timestamp, measurements: alertMeasurements }) => ({
+      chartAlerts.map(({ timestamp, measurements: alertMeasurements }) => ({
         timestamp,
         measurements: alertMeasurements,
       })),
-    [alerts],
+    [chartAlerts],
   );
   const logEntries = useMemo(
     () =>
@@ -64,13 +96,23 @@ export default function SentinelDashboard(): ReactElement {
     [alerts],
   );
   const environmentReadings = [
-    typeof measurements?.temperature_c === "number"
-      ? `${numberFormat.format(measurements.temperature_c)} °C`
+    typeof temperature === "number"
+      ? `${numberFormat.format(temperature)} °C`
       : null,
-    typeof measurements?.humidity_pct === "number"
-      ? `${numberFormat.format(measurements.humidity_pct)} %`
+    typeof humidity === "number"
+      ? `${numberFormat.format(humidity)} %`
       : null,
   ].filter((reading): reading is string => reading !== null);
+  const environmentReadingTimes = [
+    temperatureAlert
+      ? `Température : ${formatDateTime(temperatureAlert.timestamp)}`
+      : null,
+    humidityAlert
+      ? `Humidité : ${formatDateTime(humidityAlert.timestamp)}`
+      : null,
+  ]
+    .filter((reading): reading is string => reading !== null)
+    .join(" • ");
   const noDataValue = loading
     ? "Chargement…"
     : error
@@ -103,14 +145,26 @@ export default function SentinelDashboard(): ReactElement {
             : cameraDetection.cameraStatus === "error"
               ? "Consultez les logs du serveur IA"
               : cameraDetection.count > 0
-                ? `YOLOv8 • Confiance: ${cameraDetection.confidence}%`
+                ? `YOLOv8 • Confiance : ${cameraDetection.confidence}%`
                 : "YOLOv8 • Surveillance active";
   const detectionAlert =
-    cameraDetection.count > 0 || cameraDetection.cameraStatus === "error";
+    cameraDetection.serviceStatus === "connected" &&
+    (cameraDetection.count > 0 || cameraDetection.cameraStatus === "error");
 
   return (
     <div className="dark flex min-h-screen bg-black font-sans text-neutral-300">
-      <DashboardControls />
+      <DashboardControls
+        deviceIds={commandTargets}
+        deviceStatuses={deviceStatuses}
+        commands={commands}
+        latestCommand={latestCommand}
+        submittingActions={submittingActions}
+        error={commandError}
+        statusError={[deviceStatusError, statusError]
+          .filter((message): message is string => message !== null)
+          .join(" ")}
+        onSendCommand={sendCommand}
+      />
 
       <main className="flex h-screen flex-1 flex-col overflow-hidden">
         <section className="grid grid-cols-5 border-b border-neutral-800">
@@ -131,11 +185,7 @@ export default function SentinelDashboard(): ReactElement {
                   ? "Non transmise"
                   : noDataValue
             }
-            subtext={
-              latestAlert
-                ? `Dernière lecture : ${formatDateTime(latestAlert.received_at)}`
-                : "En attente d’une alerte."
-            }
+            subtext={environmentReadingTimes || "En attente d’une alerte."}
             icon={Thermometer}
             iconColor="text-cyan-400"
           />
@@ -143,16 +193,18 @@ export default function SentinelDashboard(): ReactElement {
           <KpiCard
             title="Niveau Gaz MQ-2"
             value={
-              typeof measurements?.gas_ppm === "number"
-                ? `${numberFormat.format(measurements.gas_ppm)} ppm`
+              typeof gasRaw === "number"
+                ? `${numberFormat.format(gasRaw)} (brut)`
                 : latestAlert
                   ? "Non transmis"
                   : noDataValue
             }
             subtext={
-              latestAlert
-                ? `Dernière lecture : ${formatDateTime(latestAlert.received_at)}`
-                : "En attente d’une alerte."
+              gasAlert
+                ? `Dernière lecture : ${formatDateTime(gasAlert.timestamp)}`
+                : latestAlert
+                  ? "Non transmis"
+                  : "En attente d’une alerte."
             }
             icon={Wind}
             iconColor="text-amber-500"
@@ -164,12 +216,11 @@ export default function SentinelDashboard(): ReactElement {
             subtext={detectionSubtext}
             icon={Activity}
             iconColor={
-              detectionAlert
+              cameraDetection.serviceStatus !== "connected" ||
+              cameraDetection.count > 0 ||
+              cameraDetection.cameraStatus === "error"
                 ? "text-red-500"
-                : cameraDetection.serviceStatus === "connected" &&
-                    cameraDetection.cameraStatus === "active"
-                  ? "text-emerald-500"
-                  : "text-amber-500"
+                : "text-emerald-500"
             }
             alert={detectionAlert}
           />
@@ -179,8 +230,8 @@ export default function SentinelDashboard(): ReactElement {
             value={latestAlert?.device_id ?? noDataValue}
             subtext={
               latestAlert
-                ? `Reçue : ${formatDateTime(latestAlert.received_at)}`
-                : "Aucune alerte reçue."
+                ? formatDateTime(latestAlert.timestamp)
+                : "Aucune alerte active"
             }
             icon={AlertTriangle}
             iconColor={latestAlert ? "text-red-500" : "text-emerald-500"}
@@ -190,11 +241,23 @@ export default function SentinelDashboard(): ReactElement {
 
         <section className="flex flex-1 overflow-hidden">
           <CameraPanel onDetectionChange={handleDetectionChange} />
-          <EnvironmentalCharts
-            history={chartHistory}
-            loading={loading}
-            error={error}
-          />
+          <Suspense
+            fallback={
+              <div
+                className="w-[400px] min-w-[400px] overflow-y-auto bg-black p-6 text-sm text-neutral-500"
+                role="status"
+              >
+                Chargement des graphiques…
+              </div>
+            }
+          >
+            <EnvironmentalCharts
+              history={chartHistory}
+              onPeriodChange={loadChartHistory}
+              loading={loading}
+              error={error}
+            />
+          </Suspense>
         </section>
 
         <DashboardFooter
