@@ -16,9 +16,10 @@ npm run dev
 ```
 
 The Vite development proxy forwards `/api` requests and `/ws` WebSocket
-connections to the API at `http://127.0.0.1:3000`. The dashboard loads the
-latest 50 alerts when it starts, then listens for new `alert.created` events.
-If the WebSocket reconnects, it reloads the alert list to catch up.
+connections to the API at `http://127.0.0.1:3000`. The dashboard requests alerts from the last 12 hours using ISO 8601 UTC
+`since`/`to` parameters based on measurement timestamps, then listens for new
+`alert.created` events. If the WebSocket reconnects, it requests a fresh
+12-hour range to catch up.
 
 The Vite proxy only applies during development. In production, configure the
 web server or reverse proxy to forward `/api` and `/ws` to the API, including

@@ -94,6 +94,20 @@ curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50'
 curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50&cursor=<next_cursor>'
 ```
 
+For a time-bounded query, `since` and `to` are required ISO 8601 UTC timestamps.
+The range uses the measurement timestamp and returns all matching alerts
+without cursor pagination:
+
+```sh
+curl -G 'http://127.0.0.1:3000/api/v1/alerts' \
+  --data-urlencode 'since=2026-10-07T00:00:00.000Z' \
+  --data-urlencode 'to=2026-10-07T12:00:00.000Z'
+```
+
+Both timestamps must be canonical ISO 8601 UTC values, `since` must not be
+later than `to`, and the range cannot be combined with `limit` or `cursor`.
+Requests without `since` and `to` keep the cursor-paginated behavior above.
+
 The response shape is:
 
 ```json
@@ -103,8 +117,8 @@ The response shape is:
       "id": "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
       "timestamp": "2026-10-05T12:00:00.000Z",
       "device_id": "esp8266-demo",
-      "measurements": { "temperature_c": 21.4 },
-      "sensor_states": { "motion": false },
+      "measurements": { "temperature": 21.4, "humidity": 55.0 },
+      "sensor_states": {},
       "received_at": "2026-10-05T12:00:01.000Z"
     }
   ],
@@ -129,6 +143,16 @@ The request body must be JSON with:
 Unknown top-level fields are rejected. Measurement and sensor-state names must
 be 1-64 characters. Request bodies are limited to 16 KiB.
 
+Send one alert per sensor message, using only the corresponding fields in the
+existing `measurements` and `sensor_states` objects:
+
+| Sensor  | `measurements`            | `sensor_states` |
+| ------- | ------------------------- | --------------- |
+| DHT22   | `temperature`, `humidity` | empty           |
+| MQ-2    | `gasRaw`                  | `gasDetected`   |
+| PIR     | empty                     | `motion`        |
+| HC-SR04 | `distanceCm`              | empty           |
+
 Example:
 
 ```sh
@@ -137,14 +161,8 @@ curl -i http://127.0.0.1:3000/api/v1/alerts \
   -d '{
     "timestamp": "2026-10-05T12:00:00Z",
     "device_id": "esp8266-demo",
-    "measurements": {
-      "temperature_c": 21.4,
-      "humidity_pct": 55
-    },
-    "sensor_states": {
-      "temperature": "ok",
-      "motion": false
-    }
+    "measurements": { "temperature": 21.4, "humidity": 55 },
+    "sensor_states": {}
   }'
 ```
 
@@ -164,8 +182,8 @@ Each accepted alert is broadcast to connected WebSocket clients as:
     "id": 1,
     "timestamp": "2026-10-05T12:00:00.000Z",
     "device_id": "esp8266-demo",
-    "measurements": { "temperature_c": 21.4, "humidity_pct": 55 },
-    "sensor_states": { "temperature": "ok", "motion": false },
+    "measurements": { "temperature": 21.4, "humidity": 55 },
+    "sensor_states": {},
     "received_at": "2026-10-05T12:00:01.000Z"
   }
 }

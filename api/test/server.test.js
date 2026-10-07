@@ -23,6 +23,7 @@ let websocketUrl;
 let sockets;
 let storedAlerts;
 let repositoryPageRequest;
+let repositoryTimeRange;
 let mqttCommandClient;
 let publishedCommands;
 let deviceStatuses;
@@ -30,6 +31,7 @@ let deviceStatuses;
 beforeEach(async () => {
   storedAlerts = new Map();
   repositoryPageRequest = undefined;
+  repositoryTimeRange = undefined;
   publishedCommands = [];
   deviceStatuses = new Map();
   mqttCommandClient = new EventEmitter();
@@ -57,6 +59,19 @@ beforeEach(async () => {
           hasMore: false,
           nextCursor: null,
         };
+      },
+      async listBetween(timeRange) {
+        repositoryTimeRange = timeRange;
+        return [...storedAlerts.values()]
+          .filter(
+            (alert) =>
+              Date.parse(alert.timestamp) >= Date.parse(timeRange.from) &&
+              Date.parse(alert.timestamp) <= Date.parse(timeRange.to),
+          )
+          .sort(
+            (left, right) =>
+              Date.parse(right.timestamp) - Date.parse(left.timestamp),
+          );
       },
       async close() {},
     },
@@ -183,11 +198,50 @@ test("reads alerts with cursor-pagination metadata", async () => {
   assert.deepEqual(repositoryPageRequest, { limit: 10, cursor: undefined });
 });
 
+test("reads alerts in the requested timestamp range", async () => {
+  const now = Date.now();
+  const recentAlert = {
+    id: "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
+    ...sampleAlert,
+    timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+    received_at: new Date(now - 60 * 60 * 1000 + 1000).toISOString(),
+  };
+  const oldAlert = {
+    id: "81a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
+    ...sampleAlert,
+    timestamp: new Date(now - 13 * 60 * 60 * 1000).toISOString(),
+    received_at: new Date(now - 13 * 60 * 60 * 1000 + 1000).toISOString(),
+  };
+  storedAlerts.set(recentAlert.id, recentAlert);
+  storedAlerts.set(oldAlert.id, oldAlert);
+
+  const since = new Date(now - 12 * 60 * 60 * 1000).toISOString();
+  const to = new Date(now).toISOString();
+  const response = await fetch(
+    `${baseUrl}/api/v1/alerts?since=${since}&to=${to}`,
+  );
+  const responseBody = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseBody.data, [recentAlert]);
+  assert.deepEqual(responseBody.pagination, {
+    next_cursor: null,
+    has_more: false,
+  });
+  assert.equal(
+    Date.parse(repositoryTimeRange.to) - Date.parse(repositoryTimeRange.from),
+    12 * 60 * 60 * 1000,
+  );
+  assert.equal(repositoryPageRequest, undefined);
+});
+
 test("rejects invalid alert-list query parameters", async () => {
   for (const query of [
     "limit=101",
     "limit=1&limit=2",
     "cursor=invalid",
+    "since=2026-10-07T00%3A00%3A00.000Z",
+    "since=2026-10-07T00%3A00%3A00.000Z&to=2026-10-07T12%3A00%3A00.000Z&limit=50",
     "unexpected=true",
   ]) {
     const response = await fetch(`${baseUrl}/api/v1/alerts?${query}`);
@@ -197,6 +251,7 @@ test("rejects invalid alert-list query parameters", async () => {
     assert.equal(responseBody.error.code, "invalid_query", query);
   }
   assert.equal(repositoryPageRequest, undefined);
+  assert.equal(repositoryTimeRange, undefined);
 });
 
 test("rejects unsupported methods while allowing GET and POST", async () => {

@@ -63,6 +63,83 @@ test("uses the default limit and omits the cursor when there is no next page", a
   assert.equal(result.pagination.has_more, false);
 });
 
+test("lists alerts from the requested timestamp range", async () => {
+  let repositoryArguments;
+  const service = createAlertReadService({
+    alertRepository: {
+      async listBetween(arguments_) {
+        repositoryArguments = arguments_;
+        return [alert];
+      },
+    },
+  });
+
+  const result = await service.list({
+    since: "2026-10-07T00:00:00.000Z",
+    to: "2026-10-07T12:00:00.000Z",
+  });
+
+  assert.deepEqual(repositoryArguments, {
+    from: "2026-10-07T00:00:00.000Z",
+    to: "2026-10-07T12:00:00.000Z",
+  });
+  assert.deepEqual(result.data, [alert]);
+  assert.deepEqual(result.pagination, {
+    next_cursor: null,
+    has_more: false,
+  });
+});
+
+test("rejects malformed, incomplete, reversed, or paginated time ranges", async () => {
+  let queryCalled = false;
+  const service = createAlertReadService({
+    alertRepository: {
+      async listBetween() {
+        queryCalled = true;
+      },
+      async listPage() {
+        queryCalled = true;
+      },
+    },
+  });
+
+  const invalidRanges = [
+    [
+      {
+        since: "2026-10-07T00:00:00Z",
+        to: "2026-10-07T12:00:00.000Z",
+      },
+      "since",
+    ],
+    [{ since: "2026-10-07T00:00:00.000Z" }, "to"],
+    [{ to: "2026-10-07T12:00:00.000Z" }, "since"],
+    [
+      {
+        since: "2026-10-07T12:00:00.000Z",
+        to: "2026-10-07T00:00:00.000Z",
+      },
+      "since",
+    ],
+    [
+      {
+        since: "2026-10-07T00:00:00.000Z",
+        to: "2026-10-07T12:00:00.000Z",
+        limit: "50",
+      },
+      "since",
+    ],
+  ];
+  for (const [query, field] of invalidRanges) {
+    await assert.rejects(
+      service.list(query),
+      (error) =>
+        error instanceof AlertReadValidationError &&
+        error.details[0].field === field,
+    );
+  }
+  assert.equal(queryCalled, false);
+});
+
 test("rejects invalid limits before querying the repository", async () => {
   let queryCalled = false;
   const service = createAlertReadService({

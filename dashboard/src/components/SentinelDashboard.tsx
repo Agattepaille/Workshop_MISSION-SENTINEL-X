@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Activity,
@@ -14,7 +14,6 @@ import CameraPanel, {
 } from "./dashboard/CameraPanel";
 import DashboardControls from "./dashboard/DashboardControls";
 import DashboardFooter from "./dashboard/DashboardFooter";
-import EnvironmentalCharts from "./dashboard/EnvironmentalCharts";
 import KpiCard from "./dashboard/KpiCard";
 import {
   commandTargets,
@@ -25,6 +24,10 @@ import { useDeviceCommands } from "../hooks/useDeviceCommands";
 const numberFormat = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 2,
 });
+
+const EnvironmentalCharts = lazy(
+  () => import("./dashboard/EnvironmentalCharts"),
+);
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString("fr-FR");
@@ -40,6 +43,8 @@ export default function SentinelDashboard(): ReactElement {
     });
   const {
     alerts,
+    chartAlerts,
+    loadChartHistory,
     loading,
     error,
     connectionStatus,
@@ -62,14 +67,21 @@ export default function SentinelDashboard(): ReactElement {
   );
 
   const latestAlert = alerts[0];
-  const measurements = latestAlert?.measurements;
+  const latestMeasurementAlert = (name: string) =>
+    alerts.find((alert) => typeof alert.measurements[name] === "number");
+  const temperatureAlert = latestMeasurementAlert("temperature");
+  const humidityAlert = latestMeasurementAlert("humidity");
+  const gasAlert = latestMeasurementAlert("gasRaw");
+  const temperature = temperatureAlert?.measurements.temperature;
+  const humidity = humidityAlert?.measurements.humidity;
+  const gasRaw = gasAlert?.measurements.gasRaw;
   const chartHistory = useMemo(
     () =>
-      alerts.map(({ timestamp, measurements: alertMeasurements }) => ({
+      chartAlerts.map(({ timestamp, measurements: alertMeasurements }) => ({
         timestamp,
         measurements: alertMeasurements,
       })),
-    [alerts],
+    [chartAlerts],
   );
   const logEntries = useMemo(
     () =>
@@ -85,13 +97,23 @@ export default function SentinelDashboard(): ReactElement {
     [alerts],
   );
   const environmentReadings = [
-    typeof measurements?.temperature_c === "number"
-      ? `${numberFormat.format(measurements.temperature_c)} °C`
+    typeof temperature === "number"
+      ? `${numberFormat.format(temperature)} °C`
       : null,
-    typeof measurements?.humidity_pct === "number"
-      ? `${numberFormat.format(measurements.humidity_pct)} %`
+    typeof humidity === "number"
+      ? `${numberFormat.format(humidity)} %`
       : null,
   ].filter((reading): reading is string => reading !== null);
+  const environmentReadingTimes = [
+    temperatureAlert
+      ? `Température : ${formatDateTime(temperatureAlert.timestamp)}`
+      : null,
+    humidityAlert
+      ? `Humidité : ${formatDateTime(humidityAlert.timestamp)}`
+      : null,
+  ]
+    .filter((reading): reading is string => reading !== null)
+    .join(" • ");
   const noDataValue = loading
     ? "Chargement…"
     : error
@@ -164,9 +186,7 @@ export default function SentinelDashboard(): ReactElement {
                   : noDataValue
             }
             subtext={
-              latestAlert
-                ? `Dernière lecture : ${formatDateTime(latestAlert.received_at)}`
-                : "En attente d’une alerte."
+              environmentReadingTimes || "En attente d’une alerte."
             }
             icon={Thermometer}
             iconColor="text-cyan-400"
@@ -175,15 +195,17 @@ export default function SentinelDashboard(): ReactElement {
           <KpiCard
             title="Niveau Gaz MQ-2"
             value={
-              typeof measurements?.gas_ppm === "number"
-                ? `${numberFormat.format(measurements.gas_ppm)} ppm`
+              typeof gasRaw === "number"
+                ? `${numberFormat.format(gasRaw)} (brut)`
                 : latestAlert
                   ? "Non transmis"
                   : noDataValue
             }
             subtext={
-              latestAlert
-                ? `Dernière lecture : ${formatDateTime(latestAlert.received_at)}`
+              gasAlert
+                ? `Dernière lecture : ${formatDateTime(gasAlert.timestamp)}`
+                : latestAlert
+                  ? "Non transmis"
                 : "En attente d’une alerte."
             }
             icon={Wind}
@@ -222,11 +244,23 @@ export default function SentinelDashboard(): ReactElement {
 
         <section className="flex flex-1 overflow-hidden">
           <CameraPanel onDetectionChange={handleDetectionChange} />
-          <EnvironmentalCharts
-            history={chartHistory}
-            loading={loading}
-            error={error}
-          />
+          <Suspense
+            fallback={
+              <div
+                className="w-[400px] min-w-[400px] overflow-y-auto bg-black p-6 text-sm text-neutral-500"
+                role="status"
+              >
+                Chargement des graphiques…
+              </div>
+            }
+          >
+            <EnvironmentalCharts
+              history={chartHistory}
+              onPeriodChange={loadChartHistory}
+              loading={loading}
+              error={error}
+            />
+          </Suspense>
         </section>
 
         <DashboardFooter

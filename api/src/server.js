@@ -280,7 +280,12 @@ export function createAlertServer({
 
     if (request.method === "GET") {
       try {
-        const allowedQueryParameters = new Set(["limit", "cursor"]);
+        const allowedQueryParameters = new Set([
+          "limit",
+          "cursor",
+          "since",
+          "to",
+        ]);
         for (const name of requestUrl.searchParams.keys()) {
           if (!allowedQueryParameters.has(name)) {
             throw new AlertReadValidationError(
@@ -299,6 +304,8 @@ export function createAlertServer({
         const result = await alertReadService.list({
           limit: requestUrl.searchParams.get("limit") ?? undefined,
           cursor: requestUrl.searchParams.get("cursor") ?? undefined,
+          since: requestUrl.searchParams.get("since") ?? undefined,
+          to: requestUrl.searchParams.get("to") ?? undefined,
         });
         sendJson(response, 200, result);
       } catch (error) {

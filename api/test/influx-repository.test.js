@@ -110,6 +110,50 @@ test("uses the time-and-ID cursor to continue an alert page", async () => {
   assert.deepEqual(page, { data: [], hasMore: false, nextCursor: null });
 });
 
+test("queries and returns all alerts within a timestamp range", async () => {
+  const alertId = "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f";
+  const range = {
+    from: "2026-10-07T00:00:00.000Z",
+    to: "2026-10-07T12:00:00.000Z",
+  };
+  let queryText;
+  const client = {
+    async query(query) {
+      queryText = query;
+      return (async function* () {
+        yield {
+          time: new Date("2026-10-07T11:00:00.000Z"),
+          alert_id: alertId,
+          payload_json: JSON.stringify({
+            ...alert,
+            timestamp: "2026-10-07T11:00:00.000Z",
+          }),
+          received_at: "2026-10-07T11:00:01.000Z",
+        };
+      })();
+    },
+    close() {},
+  };
+  const repository = createAlertRepository({ client, database: "alerts" });
+
+  const result = await repository.listBetween(range);
+
+  assert.match(queryText, /time >= '2026-10-07T00:00:00\.000Z'/);
+  assert.match(queryText, /time <= '2026-10-07T12:00:00\.000Z'/);
+  assert.match(queryText, /ORDER BY time DESC, alert_id DESC/);
+  assert.equal(queryText.includes("LIMIT"), false);
+  assert.deepEqual(result, [
+    {
+      id: alertId,
+      timestamp: "2026-10-07T11:00:00.000Z",
+      device_id: alert.device_id,
+      measurements: alert.measurements,
+      sensor_states: alert.sensor_states,
+      received_at: "2026-10-07T11:00:01.000Z",
+    },
+  ]);
+});
+
 test("reports all missing required environment settings", () => {
   assert.throws(
     () =>

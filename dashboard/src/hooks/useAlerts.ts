@@ -1,7 +1,27 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const ALERTS_URL = "/api/v1/alerts?limit=50";
-const MAX_ALERTS = 50;
+const ALERTS_URL = "/api/v1/alerts";
+const ALERT_HISTORY_WINDOW_MS = 12 * 60 * 60 * 1000;
+const CHART_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_RETAINED_COMMANDS = 50;
+
+export type ChartTimeRange = "12h" | "24h" | "7d";
+
+function getTimeRangeInMilliseconds(range: ChartTimeRange): number {
+  if (range === "12h") return 12 * 60 * 60 * 1000;
+  if (range === "24h") return 24 * 60 * 60 * 1000;
+  return CHART_HISTORY_WINDOW_MS;
+}
+
+function createAlertsUrl(range: ChartTimeRange = "12h"): string {
+  const to = new Date();
+  const since = new Date(to.getTime() - getTimeRangeInMilliseconds(range));
+  const parameters = new URLSearchParams({
+    since: since.toISOString(),
+    to: to.toISOString(),
+  });
+  return `${ALERTS_URL}?${parameters.toString()}`;
+}
 
 export interface Alert {
   id: string;
@@ -148,17 +168,22 @@ function parseDeviceStatusResponse(value: unknown): DeviceStatus {
   };
 }
 
-function mergeAlerts(current: Alert[], incoming: Alert[]): Alert[] {
+function mergeAlerts(
+  current: Alert[],
+  incoming: Alert[],
+  historyWindowMs = ALERT_HISTORY_WINDOW_MS,
+): Alert[] {
   const alertsById = new Map(current.map((alert) => [alert.id, alert]));
   for (const alert of incoming) alertsById.set(alert.id, alert);
+  const earliestTimestamp = Date.now() - historyWindowMs;
 
   return [...alertsById.values()]
+    .filter((alert) => Date.parse(alert.timestamp) >= earliestTimestamp)
     .sort(
       (left, right) =>
         Date.parse(right.timestamp) - Date.parse(left.timestamp) ||
         right.id.localeCompare(left.id),
-    )
-    .slice(0, MAX_ALERTS);
+    );
 }
 
 function mergeDeviceStatuses(
@@ -199,7 +224,10 @@ function mergeCommandUpdate(
       (left, right) =>
         Date.parse(left.updated_at) - Date.parse(right.updated_at),
     );
-  while (Object.keys(next).length > MAX_ALERTS && terminalCommands.length > 0) {
+  while (
+    Object.keys(next).length > MAX_RETAINED_COMMANDS &&
+    terminalCommands.length > 0
+  ) {
     const oldest = terminalCommands.shift();
     if (oldest) delete next[oldest.command_id];
   }
@@ -208,6 +236,7 @@ function mergeCommandUpdate(
 
 export function useAlerts(deviceIds: string[] = []) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [chartAlerts, setChartAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deviceStatuses, setDeviceStatuses] = useState<
@@ -221,10 +250,56 @@ export function useAlerts(deviceIds: string[] = []) {
   >({});
   const [connectionStatus, setConnectionStatus] =
     useState<AlertConnectionStatus>("connecting");
+  const chartHistoryControllerRef = useRef<AbortController | null>(null);
+  const loadedChartRangesRef = useRef(new Set<ChartTimeRange>());
+  const chartRangeRequestsRef = useRef(
+    new Map<ChartTimeRange, Promise<void>>(),
+  );
   const deviceIdsKey = [...new Set(deviceIds)].join("\u0000");
+
+  const loadChartHistory = useCallback(async (range: ChartTimeRange) => {
+    if (loadedChartRangesRef.current.has(range)) return;
+
+    const existingRequest = chartRangeRequestsRef.current.get(range);
+    if (existingRequest) return existingRequest;
+
+    const controller = chartHistoryControllerRef.current;
+    if (!controller) {
+      throw new Error("Le chargement de l’historique n’est pas disponible.");
+    }
+
+    const request = (async () => {
+      const response = await fetch(createAlertsUrl(range), {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`L’API a répondu avec le statut ${response.status}.`);
+      }
+
+      const result = parseAlertsResponse(await response.json());
+      if (controller.signal.aborted) return;
+
+      setChartAlerts((current) =>
+        mergeAlerts(current, result.data, CHART_HISTORY_WINDOW_MS),
+      );
+      loadedChartRangesRef.current.add(range);
+    })();
+    chartRangeRequestsRef.current.set(range, request);
+
+    try {
+      await request;
+    } finally {
+      if (chartRangeRequestsRef.current.get(range) === request) {
+        chartRangeRequestsRef.current.delete(range);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    chartHistoryControllerRef.current = controller;
+    loadedChartRangesRef.current.clear();
+    chartRangeRequestsRef.current.clear();
     const configuredDeviceIds = deviceIdsKey
       ? deviceIdsKey.split("\u0000")
       : [];
@@ -241,7 +316,7 @@ export function useAlerts(deviceIds: string[] = []) {
       if (initial) setLoading(true);
 
       try {
-        const response = await fetch(ALERTS_URL, {
+        const response = await fetch(createAlertsUrl(), {
           signal: controller.signal,
         });
         if (!response.ok) {
@@ -253,6 +328,10 @@ export function useAlerts(deviceIds: string[] = []) {
         if (!active || requestId !== snapshotRequest) return;
 
         setAlerts((current) => mergeAlerts(current, result.data));
+        setChartAlerts((current) =>
+          mergeAlerts(current, result.data, CHART_HISTORY_WINDOW_MS),
+        );
+        loadedChartRangesRef.current.add("12h");
         setError(null);
       } catch (cause) {
         if (!active || controller.signal.aborted) return;
@@ -348,6 +427,9 @@ export function useAlerts(deviceIds: string[] = []) {
           }
           const incomingAlert = payload.data;
           setAlerts((current) => mergeAlerts(current, [incomingAlert]));
+          setChartAlerts((current) =>
+            mergeAlerts(current, [incomingAlert], CHART_HISTORY_WINDOW_MS),
+          );
           return;
         }
 
@@ -418,6 +500,10 @@ export function useAlerts(deviceIds: string[] = []) {
     return () => {
       active = false;
       controller.abort();
+      if (chartHistoryControllerRef.current === controller) {
+        chartHistoryControllerRef.current = null;
+      }
+      chartRangeRequestsRef.current.clear();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       socket?.close(1000, "Dashboard unmounted");
     };
@@ -425,6 +511,8 @@ export function useAlerts(deviceIds: string[] = []) {
 
   return {
     alerts,
+    chartAlerts,
+    loadChartHistory,
     loading,
     error,
     connectionStatus,
