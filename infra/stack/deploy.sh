@@ -38,6 +38,19 @@ cp "$REPO_ROOT/infra/stack/docker-compose.yml" "$root/stack/"
 cp "$REPO_ROOT/infra/stack/.env.example"       "$root/stack/"
 cp "$REPO_ROOT/infra/stack/.dockerignore"      "$root/"
 cp "$REPO_ROOT/infra/stack/api/Dockerfile"     "$root/stack/api/"
+# Configuration du broker (aucun secret : les mots de passe et certificats
+# sont generes une fois sur la borne).
+mkdir -p "$root/stack/mosquitto"
+cp "$REPO_ROOT/infra/stack/mosquitto/mosquitto.conf" "$root/stack/mosquitto/"
+cp "$REPO_ROOT/infra/stack/mosquitto/acl"            "$root/stack/mosquitto/"
+
+# Pont MQTT -> API : code, manifeste ET verrou de dependances (le build fait
+# un "npm ci", il echouerait sans le fichier).
+mkdir -p "$root/stack/bridge/src"
+cp "$REPO_ROOT/infra/stack/bridge/Dockerfile"      "$root/stack/bridge/"
+cp "$REPO_ROOT/infra/stack/bridge/package.json"    "$root/stack/bridge/"
+cp "$REPO_ROOT/infra/stack/bridge/package-lock.json" "$root/stack/bridge/"
+cp "$REPO_ROOT/infra/stack/bridge/src/index.js"    "$root/stack/bridge/src/"
 
 archive="$work/sentinel-x-stack.tgz"
 tar --owner=root --group=root -czf "$archive" -C "$work" sentinel-x
@@ -50,7 +63,7 @@ cat >"$remote" <<'REMOTE'
 set -e
 install -d -m 0755 /opt/sentinel-x
 tar -xzf /tmp/sentinel-x-stack.tgz -C /opt
-find /opt/sentinel-x -path /opt/sentinel-x/stack/secrets -prune -o -exec chown root:root {} +
+find /opt/sentinel-x -path /opt/sentinel-x/stack/secrets -prune -o -path /opt/sentinel-x/stack/mosquitto -prune -o -exec chown root:root {} +
 if [ -f /opt/sentinel-x/stack/secrets/admin-token.json ]; then
   chown 1500:1500 /opt/sentinel-x/stack/secrets/admin-token.json
   chmod 600        /opt/sentinel-x/stack/secrets/admin-token.json
@@ -78,7 +91,9 @@ t = re.sub(r"\[sudo\] password for [^:]*:", "", t)
 sys.stdout.write(t.replace(os.environ["PW_SECRET"], "[masque]"))'
 
 echo "Deploie dans $REMOTE_DIR :"
-echo "  $REMOTE_DIR/api      sources de l API"
-echo "  $REMOTE_DIR/stack    compose, Dockerfile, .env.example"
+echo "  $REMOTE_DIR/api            sources de l API"
+echo "  $REMOTE_DIR/stack          compose, Dockerfiles, .env.example"
+echo "  $REMOTE_DIR/stack/mosquitto configuration du broker (sans secret)"
+echo "  $REMOTE_DIR/stack/bridge   pont MQTT -> API"
 echo
 echo "Secrets preserves : .env et stack/secrets ne sont jamais ecrases."

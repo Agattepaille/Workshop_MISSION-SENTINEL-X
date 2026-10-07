@@ -97,6 +97,66 @@ services:
         limits:
           memory: 64m
 
+  # --- Broker MQTT de la table ---------------------------------------------
+  # Les ESP8266 publient ici en MQTTS. Le socket reste prive : 1883 n est pas
+  # publie sur l hote, seul le reseau Docker interne y a acces.
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22-openssl   # variante openssl, arm64
+    container_name: sentinel-mosquitto
+    restart: unless-stopped
+    networks: [sentinel-core, sentinel-edge]
+    ports:
+      - "10.73.42.1:8883:8883"                # MQTTS : les ESP8266
+      - "127.0.0.1:8884:8884"                 # MQTT/WebSocket TLS : le dashboard
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/config/passwords:/mosquitto/config/passwords:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+  # --- Pont du broker vers l API --------------------------------------------
+  # Les cartes publient sur le broker ; le pont met la trame en forme et
+  # l ecrit par l API, seule porte d entree de la base. Il ne juge rien :
+  # aucun seuil ici, c est le role du modele predictif (pilier IA).
+  #
+  # Aucun port publie : le pont ouvre lui-meme ses connexions vers le broker
+  # et l API. Il reste sur le reseau interne, jamais sur celui d exposition.
+  mqtt-bridge:
+    build:
+      context: ..
+      dockerfile: stack/bridge/Dockerfile
+    image: sentinel-mqtt-bridge:1.0.0
+    container_name: sentinel-mqtt-bridge
+    restart: unless-stopped
+    networks: [sentinel-core]
+    depends_on:
+      - mosquitto
+      - api
+    environment:
+      NODE_ENV: production
+      # Identifiant dedie : son ACL se LIMITE a la lecture des capteurs. Un
+      # pont compromis ne peut donc pas publier d ordres vers les cartes.
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: bridge
+      MQTT_PASSWORD: "${MQTT_PASSWORD:?variable MQTT_PASSWORD absente du .env}"
+      MQTT_TOPIC: "sentinel/table/sensors/#"
+      API_URL: http://api:3000/api/v1/alerts
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+
 networks:
   # Reseau ETANCHE entre l API et la base : aucun trafic sortant, et surtout
   # aucun port publie. La base n est joignable que par l API.
@@ -109,3 +169,4 @@ networks:
 
 volumes:
   influxdb3-data:
+  mosquitto-data:
