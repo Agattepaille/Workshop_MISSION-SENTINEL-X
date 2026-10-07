@@ -16,6 +16,7 @@ interface Detection {
 }
 
 interface DetectionResponse {
+  camera_status: CameraStatus;
   count: number;
   detections: Detection[];
   latency_ms: number;
@@ -29,7 +30,10 @@ interface DetectionResponse {
 
 export default function CameraPanel() {
   const [detections, setDetections] = useState<Detection[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [serviceStatus, setServiceStatus] =
+    useState<ServiceStatus>("connecting");
+  const [cameraStatus, setCameraStatus] =
+    useState<CameraStatus>("starting");
 
   const [latency, setLatency] = useState(0);
   const [fps, setFps] = useState(0);
@@ -47,10 +51,15 @@ export default function CameraPanel() {
         const response = await fetch(`${AI_SERVER}/detections`);
 
         if (!response.ok) {
-          throw new Error("Erreur API");
+          throw new Error(
+            `Le service IA a répondu avec le statut ${response.status}.`,
+          );
         }
 
-        const data: DetectionResponse = await response.json();
+        const payload: unknown = await response.json();
+        if (!isDetectionResponse(payload)) {
+          throw new Error("Le service IA a renvoyé un état de caméra invalide.");
+        }
 
         console.log("YOLO :", data);
 
@@ -78,6 +87,8 @@ export default function CameraPanel() {
     return () => clearInterval(interval);
   }, []);
 
+  const cameraActive =
+    serviceStatus === "connected" && cameraStatus === "active";
   const personCount = detections.length;
 
   const confidence =
@@ -90,6 +101,22 @@ export default function CameraPanel() {
           ) * 100
         )
       : 0;
+  const statusMessage =
+    serviceStatus === "connecting"
+      ? "Connexion au service de vision en cours…"
+      : serviceStatus === "disconnected"
+        ? "Service IA inaccessible. Vérifiez que le serveur YOLO est démarré."
+        : cameraStatus === "starting"
+          ? "Initialisation de la caméra et du modèle YOLO…"
+          : cameraStatus === "unavailable"
+            ? "Caméra inactive ou inaccessible. Vérifiez qu’elle est branchée et activée."
+            : cameraStatus === "error"
+              ? "Erreur de détection YOLO. Consultez les logs du serveur IA."
+              : null;
+  const statusIsError =
+    serviceStatus === "disconnected" ||
+    cameraStatus === "unavailable" ||
+    cameraStatus === "error";
 
   return (
     <section className="flex-1 min-w-0 border-r border-neutral-800 p-4 flex flex-col">
@@ -183,10 +210,9 @@ export default function CameraPanel() {
 
         {/* INFORMATIONS VIDEO */}
         <div className="absolute bottom-3 left-3 flex gap-3 text-xs font-mono text-emerald-400">
-
-          <Badge className="bg-red-600 text-white">
-            REC
-          </Badge>
+          {cameraActive && (
+            <Badge className="bg-red-600 text-white">REC</Badge>
+          )}
 
           <span>
             YOLOv8n

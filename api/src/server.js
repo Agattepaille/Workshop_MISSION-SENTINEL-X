@@ -1,13 +1,28 @@
+import "dotenv/config";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
-import { createAlertRepository } from "./persistence/alert-repository.sqlite.js";
+import { createAlertRepository } from "./persistence/alert-repository.influx.js";
 import {
   AlertValidationError,
-  createAlertService,
-} from "./services/alert-service.js";
+  createAlertWriteService,
+} from "./services/alert-write-service.js";
+import {
+  AlertReadValidationError,
+  createAlertReadService,
+} from "./services/alert-read-service.js";
+import {
+  CommandDispatchError,
+  CommandValidationError,
+  createCommandService,
+} from "./services/command-service.js";
+import { createMqttCommandClient } from "./mqtt-command-client.js";
 
 const ALERTS_PATH = "/api/v1/alerts";
+const COMMANDS_PATH = "/api/v1/commands";
+const COMMAND_STATUS_PATH = /^\/api\/v1\/commands\/([^/]+)$/;
+const DEVICE_STATUS_PATH = /^\/api\/v1\/devices\/([^/]+)\/status$/;
+const DEVICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const WEBSOCKET_PATH = "/ws";
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -67,18 +82,252 @@ async function readJsonBody(request) {
 }
 
 export function createAlertServer({
-  databasePath = process.env.DATABASE_PATH ?? ".data/sentinel-x.sqlite",
-  alertRepository = createAlertRepository(databasePath),
+  alertRepository,
+  mqttCommandClient: injectedMqttCommandClient,
 } = {}) {
-  const alertService = createAlertService({ alertRepository });
+  const repository = alertRepository ?? createAlertRepository();
+  const alertWriteService = createAlertWriteService({
+    alertRepository: repository,
+  });
+  const alertReadService = createAlertReadService({
+    alertRepository: repository,
+  });
+  const mqttCommandClient =
+    injectedMqttCommandClient ?? createMqttCommandClient();
+  const commandService = createCommandService({ mqttCommandClient });
   const websocketServer = new WebSocketServer({ noServer: true });
 
+  function broadcast(type, data) {
+    const notification = JSON.stringify({ type, data });
+    for (const client of websocketServer.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(notification, (error) => {
+          if (error) {
+            console.error(
+              `Failed to send ${type} to a WebSocket client:`,
+              error,
+            );
+          }
+        });
+      }
+    }
+  }
+
+  commandService.on("updated", (command) => {
+    broadcast("command.updated", command);
+  });
+  mqttCommandClient.on("device-status", (status) => {
+    broadcast("device.status", status);
+  });
+
   const server = createServer(async (request, response) => {
-    const { pathname } = new URL(request.url, "http://localhost");
+    const requestUrl = new URL(request.url, "http://localhost");
+    const { pathname } = requestUrl;
+
+    if (pathname === COMMANDS_PATH) {
+      if (request.method !== "POST") {
+        sendJson(
+          response,
+          405,
+          {
+            error: {
+              code: "method_not_allowed",
+              message: "Use POST for this route.",
+            },
+          },
+          { allow: "POST" },
+        );
+        return;
+      }
+
+      try {
+        const command = await commandService.create(
+          await readJsonBody(request),
+        );
+        sendJson(response, 202, { data: command });
+      } catch (error) {
+        if (error instanceof HttpError) {
+          sendJson(response, error.status, {
+            error: { code: error.code, message: error.message },
+          });
+          return;
+        }
+        if (error instanceof CommandValidationError) {
+          sendJson(response, 422, {
+            error: {
+              code: "validation_failed",
+              message: error.message,
+              ...(error.details.length > 0 ? { details: error.details } : {}),
+            },
+          });
+          return;
+        }
+        if (error instanceof CommandDispatchError) {
+          console.error("Failed to dispatch command:", error);
+          sendJson(response, 503, {
+            error: {
+              code: "mqtt_unavailable",
+              message: "The command could not be delivered to the MQTT broker.",
+            },
+          });
+          return;
+        }
+
+        console.error("Failed to process command:", error);
+        sendJson(response, 500, {
+          error: {
+            code: "internal_error",
+            message: "The command could not be processed.",
+          },
+        });
+      }
+      return;
+    }
+
+    const commandStatusMatch = COMMAND_STATUS_PATH.exec(pathname);
+    if (commandStatusMatch) {
+      if (request.method !== "GET") {
+        sendJson(
+          response,
+          405,
+          {
+            error: {
+              code: "method_not_allowed",
+              message: "Use GET for this route.",
+            },
+          },
+          { allow: "GET" },
+        );
+        return;
+      }
+
+      const command = commandService.get(commandStatusMatch[1]);
+      if (!command) {
+        sendJson(response, 404, {
+          error: {
+            code: "command_not_found",
+            message: "Command was not found or is no longer available.",
+          },
+        });
+        return;
+      }
+      sendJson(response, 200, { data: command });
+      return;
+    }
+
+    const deviceStatusMatch = DEVICE_STATUS_PATH.exec(pathname);
+    if (deviceStatusMatch) {
+      if (request.method !== "GET") {
+        sendJson(
+          response,
+          405,
+          {
+            error: {
+              code: "method_not_allowed",
+              message: "Use GET for this route.",
+            },
+          },
+          { allow: "GET" },
+        );
+        return;
+      }
+
+      let deviceId;
+      try {
+        deviceId = decodeURIComponent(deviceStatusMatch[1]);
+      } catch {
+        sendJson(response, 400, {
+          error: {
+            code: "invalid_device_id",
+            message: "device_id must be a valid URL-encoded path segment.",
+          },
+        });
+        return;
+      }
+      if (!DEVICE_ID_PATTERN.test(deviceId)) {
+        sendJson(response, 400, {
+          error: {
+            code: "invalid_device_id",
+            message: "device_id contains unsupported characters.",
+          },
+        });
+        return;
+      }
+
+      const deviceStatus = mqttCommandClient.getDeviceStatus(deviceId);
+      sendJson(response, 200, {
+        data: {
+          device_id: deviceId,
+          status:
+            deviceStatus === null
+              ? "unknown"
+              : deviceStatus.online
+                ? "online"
+                : "offline",
+          received_at: deviceStatus?.received_at ?? null,
+          mqtt_connected: mqttCommandClient.connected,
+        },
+      });
+      return;
+    }
+
     if (pathname !== ALERTS_PATH) {
       sendJson(response, 404, {
         error: { code: "not_found", message: "Route not found." },
       });
+      return;
+    }
+
+    if (request.method === "GET") {
+      try {
+        const allowedQueryParameters = new Set([
+          "limit",
+          "cursor",
+          "since",
+          "to",
+        ]);
+        for (const name of requestUrl.searchParams.keys()) {
+          if (!allowedQueryParameters.has(name)) {
+            throw new AlertReadValidationError(
+              "Invalid alert query parameters.",
+              [{ field: name, message: "Unknown query parameter." }],
+            );
+          }
+          if (requestUrl.searchParams.getAll(name).length !== 1) {
+            throw new AlertReadValidationError(
+              "Invalid alert query parameters.",
+              [{ field: name, message: "Query parameter must appear once." }],
+            );
+          }
+        }
+
+        const result = await alertReadService.list({
+          limit: requestUrl.searchParams.get("limit") ?? undefined,
+          cursor: requestUrl.searchParams.get("cursor") ?? undefined,
+          since: requestUrl.searchParams.get("since") ?? undefined,
+          to: requestUrl.searchParams.get("to") ?? undefined,
+        });
+        sendJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof AlertReadValidationError) {
+          sendJson(response, 400, {
+            error: {
+              code: "invalid_query",
+              message: error.message,
+              ...(error.details.length > 0 ? { details: error.details } : {}),
+            },
+          });
+          return;
+        }
+
+        console.error("Failed to read alerts:", error);
+        sendJson(response, 500, {
+          error: {
+            code: "internal_error",
+            message: "The alerts could not be retrieved.",
+          },
+        });
+      }
       return;
     }
 
@@ -89,36 +338,21 @@ export function createAlertServer({
         {
           error: {
             code: "method_not_allowed",
-            message: "Use POST for this route.",
+            message: "Use GET or POST for this route.",
           },
         },
         {
-          allow: "POST",
+          allow: "GET, POST",
         },
       );
       return;
     }
 
     try {
-      const savedAlert = alertService.create(await readJsonBody(request));
-      const notification = JSON.stringify({
-        type: "alert.created",
-        data: savedAlert,
-      });
-
-      for (const client of websocketServer.clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(notification, (error) => {
-            if (error) {
-              console.error(
-                "Failed to send alert to a WebSocket client:",
-                error,
-              );
-            }
-          });
-        }
-      }
-
+      const savedAlert = await alertWriteService.create(
+        await readJsonBody(request),
+      );
+      broadcast("alert.created", savedAlert);
       sendJson(response, 201, { data: savedAlert });
     } catch (error) {
       if (error instanceof HttpError) {
@@ -181,7 +415,9 @@ export function createAlertServer({
         });
       }
       websocketServer.close();
-      alertRepository.close();
+      commandService.close();
+      await mqttCommandClient.close();
+      await repository.close();
     },
   };
 }
@@ -198,6 +434,9 @@ if (
     console.log(`SENTINEL-X API listening on http://${host}:${port}`);
     console.log(
       `WebSocket alerts available at ws://${host}:${port}${WEBSOCKET_PATH}`,
+    );
+    console.log(
+      `MQTT command delivery ${process.env.MQTT_URL ? "configured" : "disabled: set MQTT_URL"}`,
     );
   });
 
