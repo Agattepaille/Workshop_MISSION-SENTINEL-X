@@ -21,6 +21,10 @@ connections to the API at `http://127.0.0.1:3000`. The dashboard requests alerts
 `alert.created` events. If the WebSocket reconnects, it requests a fresh
 12-hour range to catch up.
 
+The dashboard preserves measurement keys and keeps each key in a separate
+series. It displays French labels for known keys such as `temperature_c`,
+`humidity_pct`, `gas_raw`, and `motion`; the underlying API data is unchanged.
+
 The Vite proxy only applies during development. In production, configure the
 web server or reverse proxy to forward `/api` and `/ws` to the API, including
 WebSocket upgrades.
