@@ -5,14 +5,6 @@ function quoteSqlString(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function normalizeTimestamp(value) {
-  const timestamp = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(timestamp.getTime())) {
-    throw new Error("InfluxDB returned an invalid alert timestamp.");
-  }
-  return timestamp.toISOString();
-}
-
 async function collectRows(queryResult) {
   const rows = [];
   for await (const row of queryResult) {
@@ -54,38 +46,16 @@ export function createAlertRepository({ client, database } = {}) {
       });
     },
 
-    async listPage({ limit, cursor }) {
-      const cursorFilter = cursor
-        ? `WHERE (time < ${quoteSqlString(cursor.timestamp)} OR (time = ${quoteSqlString(cursor.timestamp)} AND alert_id < ${quoteSqlString(cursor.alertId)}))`
-        : "";
+    async listAll() {
       const query = `
         SELECT time, alert_id, payload_json, received_at
         FROM alerts
-        ${cursorFilter}
         ORDER BY time DESC, alert_id DESC
-        LIMIT ${limit + 1}
       `;
       const rows = await collectRows(
         await influxClient.query(query, influxDatabase),
       );
-
-      const hasMore = rows.length > limit;
-      if (hasMore) rows.pop();
-
-      const data = rows.map(deserializeAlert);
-      const lastRow = rows.at(-1);
-
-      return {
-        data,
-        hasMore,
-        nextCursor:
-          hasMore && lastRow
-            ? {
-                timestamp: normalizeTimestamp(lastRow.time),
-                alertId: lastRow.alert_id,
-              }
-            : null,
-      };
+      return rows.map(deserializeAlert);
     },
 
     async listBetween({ from, to }) {

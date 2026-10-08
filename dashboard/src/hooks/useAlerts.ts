@@ -62,10 +62,6 @@ function isDeviceStatus(value: unknown): value is DeviceStatus["status"] {
 
 interface AlertsResponse {
   data: Alert[];
-  pagination: {
-    next_cursor: string | null;
-    has_more: boolean;
-  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -102,26 +98,14 @@ function parseAlertsResponse(value: unknown): AlertsResponse {
   if (
     !isRecord(value) ||
     !Array.isArray(value.data) ||
-    !value.data.every(isAlert) ||
-    !isRecord(value.pagination) ||
-    typeof value.pagination.has_more !== "boolean" ||
-    !(
-      value.pagination.next_cursor === null ||
-      typeof value.pagination.next_cursor === "string"
-    )
+    !value.data.every(isAlert)
   ) {
     throw new Error(
       "La réponse de l’API ne contient pas une liste d’alertes valide.",
     );
   }
 
-  return {
-    data: value.data,
-    pagination: {
-      next_cursor: value.pagination.next_cursor,
-      has_more: value.pagination.has_more,
-    },
-  };
+  return { data: value.data };
 }
 
 export function isDeviceCommand(value: unknown): value is DeviceCommand {
