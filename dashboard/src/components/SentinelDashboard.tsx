@@ -66,14 +66,18 @@ export default function SentinelDashboard(): ReactElement {
   );
 
   const latestAlert = alerts[0];
-  const latestMeasurementAlert = (name: string) =>
-    alerts.find((alert) => typeof alert.measurements[name] === "number");
-  const temperatureAlert = latestMeasurementAlert("temperature");
-  const humidityAlert = latestMeasurementAlert("humidity");
-  const gasAlert = latestMeasurementAlert("gasRaw");
-  const temperature = temperatureAlert?.measurements.temperature;
-  const humidity = humidityAlert?.measurements.humidity;
-  const gasRaw = gasAlert?.measurements.gasRaw;
+  const temperatureAlert = alerts.find(
+    (alert) => typeof alert.measurements.temperature_c === "number",
+  );
+  const humidityAlert = alerts.find(
+    (alert) => typeof alert.measurements.humidity_pct === "number",
+  );
+  const gasAlert = alerts.find(
+    (alert) => typeof alert.measurements.gas_raw === "number",
+  );
+  const temperature = temperatureAlert?.measurements.temperature_c;
+  const humidity = humidityAlert?.measurements.humidity_pct;
+  const gasRaw = gasAlert?.measurements.gas_raw;
   const chartHistory = useMemo(
     () =>
       chartAlerts.map(({ timestamp, measurements: alertMeasurements }) => ({
@@ -177,7 +181,7 @@ export default function SentinelDashboard(): ReactElement {
           />
 
           <KpiCard
-            title="Température DHT22"
+            title="Température / Humidité"
             value={
               environmentReadings.length > 0
                 ? environmentReadings.join(" / ")
