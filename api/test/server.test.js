@@ -22,6 +22,7 @@ let baseUrl;
 let websocketUrl;
 let sockets;
 let storedAlerts;
+let storedEvents;
 let repositoryTimeRange;
 let mqttCommandClient;
 let publishedCommands;
@@ -29,6 +30,7 @@ let deviceStatuses;
 
 beforeEach(async () => {
   storedAlerts = new Map();
+  storedEvents = new Map();
   repositoryTimeRange = undefined;
   publishedCommands = [];
   deviceStatuses = new Map();
@@ -68,6 +70,22 @@ beforeEach(async () => {
             (left, right) =>
               Date.parse(right.timestamp) - Date.parse(left.timestamp),
           );
+      },
+      async saveEvent(event, receivedAt, id) {
+        storedEvents.set(id, {
+          id,
+          ...event,
+          received_at: receivedAt,
+        });
+      },
+      async getLatestEvent() {
+        return (
+          [...storedEvents.values()].sort(
+            (left, right) =>
+              Date.parse(right.timestamp) - Date.parse(left.timestamp) ||
+              right.id.localeCompare(left.id),
+          )[0] ?? null
+        );
       },
       async close() {},
     },
@@ -251,6 +269,58 @@ test("rejects unsupported methods while allowing GET and POST", async () => {
   assert.equal(response.headers.get("allow"), "GET, POST");
   assert.equal(responseBody.error.code, "method_not_allowed");
   assert.equal(responseBody.error.message, "Use GET or POST for this route.");
+});
+
+test("persists events, broadcasts them and returns the latest one", async () => {
+  const socket = await connectWebSocket();
+  const notificationPromise = once(socket, "message");
+  const response = await fetch(`${baseUrl}/api/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      timestamp: "2026-10-08T18:30:00Z",
+      source_type: "camera",
+      source_id: "CAM-ENT-03",
+    }),
+  });
+  const responseBody = await response.json();
+  const [message] = await notificationPromise;
+  const notification = JSON.parse(message.toString());
+
+  assert.equal(response.status, 201);
+  assert.equal(responseBody.data.source_type, "camera");
+  assert.equal(responseBody.data.source_id, "CAM-ENT-03");
+  assert.equal(responseBody.data.timestamp, "2026-10-08T18:30:00.000Z");
+  assert.match(responseBody.data.id, /^[0-9a-f-]{36}$/);
+  assert.equal(notification.type, "event.created");
+  assert.equal(notification.data.id, responseBody.data.id);
+  assert.equal(storedEvents.size, 1);
+
+  const latestResponse = await fetch(`${baseUrl}/api/v1/events/latest`);
+  assert.equal(latestResponse.status, 200);
+  assert.deepEqual((await latestResponse.json()).data, responseBody.data);
+});
+
+test("returns null when there are no events and rejects invalid events", async () => {
+  const emptyResponse = await fetch(`${baseUrl}/api/v1/events/latest`);
+  assert.equal(emptyResponse.status, 200);
+  assert.equal((await emptyResponse.json()).data, null);
+
+  const invalidResponse = await fetch(`${baseUrl}/api/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      timestamp: "invalid",
+      source_type: "camera",
+      source_id: "CAM-ENT-03",
+      image: "not-allowed",
+    }),
+  });
+  const invalidBody = await invalidResponse.json();
+
+  assert.equal(invalidResponse.status, 422);
+  assert.equal(invalidBody.error.code, "validation_failed");
+  assert.equal(storedEvents.size, 0);
 });
 
 test("returns explicit errors for unsupported media type and malformed JSON", async () => {

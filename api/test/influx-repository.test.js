@@ -44,6 +44,78 @@ test("writes an alert with the InfluxDB 3 API and closes the client", async () =
   assert.equal(closed, true);
 });
 
+test("writes events to their own InfluxDB measurement", async () => {
+  let writeArguments;
+  const client = {
+    async write(...args) {
+      writeArguments = args;
+    },
+    close() {},
+  };
+  const repository = createAlertRepository({
+    client,
+    database: "alerts",
+  });
+
+  await repository.saveEvent(
+    {
+      timestamp: "2026-10-08T18:30:00.000Z",
+      source_type: "camera",
+      source_id: "CAM-ENT-03",
+    },
+    "2026-10-08T18:30:01.000Z",
+    "event-uuid",
+  );
+
+  const [writtenPoint, database, precision, options] = writeArguments;
+  assert.equal(database, "alerts");
+  assert.equal(precision, undefined);
+  assert.deepEqual(options, { useV2Api: false, acceptPartial: false });
+  const lineProtocol = writtenPoint.toLineProtocol();
+  assert.match(lineProtocol, /^events,/);
+  assert.match(lineProtocol, /event_id=event-uuid/);
+  assert.match(lineProtocol, /source_type=camera/);
+  assert.match(lineProtocol, /source_id=CAM-ENT-03/);
+  assert.match(lineProtocol, /received_at=/);
+  assert.doesNotMatch(lineProtocol, /image|payload_json/);
+});
+
+test("reads the latest event or returns null when none exists", async () => {
+  const eventRow = {
+    time: new Date("2026-10-08T18:30:00.000Z"),
+    event_id: "event-uuid",
+    source_type: "camera",
+    source_id: "CAM-ENT-03",
+    received_at: "2026-10-08T18:30:01.000Z",
+  };
+  let queryText;
+  let rows = [eventRow];
+  const client = {
+    async query(query) {
+      queryText = query;
+      return (async function* () {
+        yield* rows;
+      })();
+    },
+    close() {},
+  };
+  const repository = createAlertRepository({ client, database: "alerts" });
+
+  assert.deepEqual(await repository.getLatestEvent(), {
+    id: eventRow.event_id,
+    timestamp: "2026-10-08T18:30:00.000Z",
+    source_type: "camera",
+    source_id: "CAM-ENT-03",
+    received_at: eventRow.received_at,
+  });
+  assert.match(queryText, /FROM events/);
+  assert.match(queryText, /ORDER BY time DESC, event_id DESC/);
+  assert.match(queryText, /LIMIT 1/);
+
+  rows = [];
+  assert.equal(await repository.getLatestEvent(), null);
+});
+
 test("reads all alerts in reverse chronological order without a limit", async () => {
   const firstId = "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f";
   const secondId = "81a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f";

@@ -21,6 +21,16 @@ function deserializeAlert(row) {
   };
 }
 
+function deserializeEvent(row) {
+  return {
+    id: row.event_id,
+    timestamp: new Date(row.time).toISOString(),
+    source_type: row.source_type,
+    source_id: row.source_id,
+    received_at: row.received_at,
+  };
+}
+
 export function createAlertRepository({ client, database } = {}) {
   const connection =
     client && database ? { client, database } : createInfluxConnection();
@@ -44,6 +54,33 @@ export function createAlertRepository({ client, database } = {}) {
         useV2Api: false,
         acceptPartial: false,
       });
+    },
+
+    async saveEvent(event, receivedAt, id) {
+      const point = Point.measurement("events")
+        .setTag("event_id", id)
+        .setTag("source_type", event.source_type)
+        .setTag("source_id", event.source_id)
+        .setStringField("received_at", receivedAt)
+        .setTimestamp(new Date(event.timestamp));
+
+      await influxClient.write(point, influxDatabase, undefined, {
+        useV2Api: false,
+        acceptPartial: false,
+      });
+    },
+
+    async getLatestEvent() {
+      const query = `
+        SELECT time, event_id, source_type, source_id, received_at
+        FROM events
+        ORDER BY time DESC, event_id DESC
+        LIMIT 1
+      `;
+      const rows = await collectRows(
+        await influxClient.query(query, influxDatabase),
+      );
+      return rows.length > 0 ? deserializeEvent(rows[0]) : null;
     },
 
     async listAll() {

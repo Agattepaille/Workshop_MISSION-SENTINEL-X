@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { useAlerts } from "../hooks/useAlerts";
+import { useEvents } from "../hooks/useEvents";
 import CameraPanel, {
   type CameraDetectionSummary,
 } from "./dashboard/CameraPanel";
@@ -67,6 +68,12 @@ export default function SentinelDashboard(): ReactElement {
     deviceStatusError,
     commandUpdates,
   } = useAlerts(configuredDeviceIds);
+  const {
+    latestEvent,
+    loading: eventsLoading,
+    error: eventError,
+    createEvent,
+  } = useEvents();
 
   const {
     commands,
@@ -367,25 +374,34 @@ export default function SentinelDashboard(): ReactElement {
           />
 
           <KpiCard
-            title="Dernière alerte"
-            value={latestAlert?.device_id ?? noDataValue}
+            title="Dernier événement"
+            value={
+              latestEvent
+                ? `Caméra • ${latestEvent.source_id}`
+                : noDataValue
+            }
             subtext={
-              latestAlert
-                ? formatDateTime(latestAlert.timestamp)
-                : "Aucune alerte active"
+              latestEvent
+                ? formatDateTime(latestEvent.timestamp)
+                : eventsLoading
+                  ? "Chargement du dernier événement…"
+                  : eventError ?? "Aucun événement enregistré"
             }
             icon={AlertTriangle}
             iconColor={
-              latestAlert
+              latestEvent
                 ? "text-red-500"
                 : "text-emerald-500"
             }
-            alert={Boolean(latestAlert)}
+            alert={Boolean(latestEvent)}
           />
         </section>
 
         <section className="flex flex-1 overflow-hidden">
-          <CameraPanel onDetectionChange={handleDetectionChange} />
+          <CameraPanel
+            onDetectionChange={handleDetectionChange}
+            onEventDetected={createEvent}
+          />
 
           <Suspense
             fallback={

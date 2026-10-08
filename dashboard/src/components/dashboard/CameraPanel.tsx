@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import type { Event, EventInput } from "@/hooks/useEvents";
 
 const AI_SERVER = "http://127.0.0.1:5001";
 
@@ -82,10 +83,12 @@ function isDetectionResponse(value: unknown): value is DetectionResponse {
 
 interface CameraPanelProps {
   onDetectionChange: (summary: CameraDetectionSummary) => void;
+  onEventDetected: (event: EventInput) => Promise<Event>;
 }
 
 export default function CameraPanel({
   onDetectionChange,
+  onEventDetected,
 }: CameraPanelProps) {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [serviceStatus, setServiceStatus] =
@@ -99,9 +102,11 @@ export default function CameraPanel({
     height: 480,
   });
   const [performance, setPerformance] = useState<"OK" | "SLOW">("OK");
+  const [eventError, setEventError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    let presenceActive = false;
 
     const getDetections = async () => {
       try {
@@ -123,6 +128,30 @@ export default function CameraPanel({
         }
 
         const nextCameraStatus = payload.camera_status ?? "active";
+        if (nextCameraStatus === "active") {
+          const personPresent = payload.detections.length > 0;
+          if (!personPresent) {
+            presenceActive = false;
+          } else if (!presenceActive) {
+            presenceActive = true;
+            const timestamp = new Date().toISOString();
+            void onEventDetected({
+              timestamp,
+              source_type: "camera",
+              source_id: "CAM-ENT-03",
+            })
+              .then(() => {
+                if (mounted) setEventError(null);
+              })
+              .catch((error: unknown) => {
+                if (!mounted) return;
+                const message =
+                  error instanceof Error ? error.message : "Erreur inconnue.";
+                console.error("Impossible d’enregistrer l’événement :", error);
+                setEventError(message);
+              });
+          }
+        }
         const confidence =
           payload.detections.length > 0
             ? Math.round(
@@ -173,7 +202,7 @@ export default function CameraPanel({
       mounted = false;
       clearInterval(interval);
     };
-  }, [cameraStatus, onDetectionChange]);
+  }, [cameraStatus, onDetectionChange, onEventDetected]);
 
   const cameraActive =
     serviceStatus === "connected" && cameraStatus === "active";
@@ -276,6 +305,12 @@ export default function CameraPanel({
           </div>
         )}
       </Card>
+
+      {eventError && (
+        <p className="mt-2 text-xs text-red-400" role="alert">
+          Impossible d’enregistrer le dernier événement : {eventError}
+        </p>
+      )}
 
       <div className="mt-2 flex justify-between font-mono text-[10px] text-neutral-500">
         <span>Source: USB • CAM-ENT-03</span>
