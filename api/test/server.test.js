@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { afterEach, beforeEach, test } from "node:test";
 import WebSocket from "ws";
 import { createAlertServer } from "../src/server.js";
@@ -23,11 +23,27 @@ let websocketUrl;
 let sockets;
 let storedAlerts;
 let repositoryPageRequest;
+let repositoryTimeRange;
+let mqttCommandClient;
+let publishedCommands;
+let deviceStatuses;
 
 beforeEach(async () => {
   storedAlerts = new Map();
   repositoryPageRequest = undefined;
+  repositoryTimeRange = undefined;
+  publishedCommands = [];
+  deviceStatuses = new Map();
+  mqttCommandClient = new EventEmitter();
+  mqttCommandClient.connected = true;
+  mqttCommandClient.publishCommand = async (command) => {
+    publishedCommands.push(command);
+  };
+  mqttCommandClient.getDeviceStatus = (deviceId) =>
+    deviceStatuses.get(deviceId) ?? null;
+  mqttCommandClient.close = async () => {};
   app = createAlertServer({
+    mqttCommandClient,
     alertRepository: {
       async save(alert, receivedAt, id) {
         storedAlerts.set(id, {
@@ -43,6 +59,19 @@ beforeEach(async () => {
           hasMore: false,
           nextCursor: null,
         };
+      },
+      async listBetween(timeRange) {
+        repositoryTimeRange = timeRange;
+        return [...storedAlerts.values()]
+          .filter(
+            (alert) =>
+              Date.parse(alert.timestamp) >= Date.parse(timeRange.from) &&
+              Date.parse(alert.timestamp) <= Date.parse(timeRange.to),
+          )
+          .sort(
+            (left, right) =>
+              Date.parse(right.timestamp) - Date.parse(left.timestamp),
+          );
       },
       async close() {},
     },
@@ -125,6 +154,7 @@ test("rejects null measurement and sensor-state objects", async () => {
 test("returns an error and does not broadcast when persistence fails", async () => {
   await app.close();
   app = createAlertServer({
+    mqttCommandClient,
     alertRepository: {
       async save() {
         throw new Error("InfluxDB unavailable");
@@ -168,11 +198,50 @@ test("reads alerts with cursor-pagination metadata", async () => {
   assert.deepEqual(repositoryPageRequest, { limit: 10, cursor: undefined });
 });
 
+test("reads alerts in the requested timestamp range", async () => {
+  const now = Date.now();
+  const recentAlert = {
+    id: "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
+    ...sampleAlert,
+    timestamp: new Date(now - 60 * 60 * 1000).toISOString(),
+    received_at: new Date(now - 60 * 60 * 1000 + 1000).toISOString(),
+  };
+  const oldAlert = {
+    id: "81a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
+    ...sampleAlert,
+    timestamp: new Date(now - 13 * 60 * 60 * 1000).toISOString(),
+    received_at: new Date(now - 13 * 60 * 60 * 1000 + 1000).toISOString(),
+  };
+  storedAlerts.set(recentAlert.id, recentAlert);
+  storedAlerts.set(oldAlert.id, oldAlert);
+
+  const since = new Date(now - 12 * 60 * 60 * 1000).toISOString();
+  const to = new Date(now).toISOString();
+  const response = await fetch(
+    `${baseUrl}/api/v1/alerts?since=${since}&to=${to}`,
+  );
+  const responseBody = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(responseBody.data, [recentAlert]);
+  assert.deepEqual(responseBody.pagination, {
+    next_cursor: null,
+    has_more: false,
+  });
+  assert.equal(
+    Date.parse(repositoryTimeRange.to) - Date.parse(repositoryTimeRange.from),
+    12 * 60 * 60 * 1000,
+  );
+  assert.equal(repositoryPageRequest, undefined);
+});
+
 test("rejects invalid alert-list query parameters", async () => {
   for (const query of [
     "limit=101",
     "limit=1&limit=2",
     "cursor=invalid",
+    "since=2026-10-07T00%3A00%3A00.000Z",
+    "since=2026-10-07T00%3A00%3A00.000Z&to=2026-10-07T12%3A00%3A00.000Z&limit=50",
     "unexpected=true",
   ]) {
     const response = await fetch(`${baseUrl}/api/v1/alerts?${query}`);
@@ -182,6 +251,7 @@ test("rejects invalid alert-list query parameters", async () => {
     assert.equal(responseBody.error.code, "invalid_query", query);
   }
   assert.equal(repositoryPageRequest, undefined);
+  assert.equal(repositoryTimeRange, undefined);
 });
 
 test("rejects unsupported methods while allowing GET and POST", async () => {
@@ -215,4 +285,117 @@ test("returns explicit errors for unsupported media type and malformed JSON", as
   );
   assert.equal(malformedJson.status, 400);
   assert.equal((await malformedJson.json()).error.code, "invalid_json");
+});
+
+test("accepts a command, publishes it and exposes its current state", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+    }),
+  });
+  const body = await response.json();
+  const commandId = body.data.command_id;
+
+  assert.equal(response.status, 202);
+  assert.equal(body.data.status, "pending");
+  assert.match(commandId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(publishedCommands[0], {
+    deviceId: "esp8266-demo",
+    payload: {
+      command_id: commandId,
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+      duration_ms: 5000,
+    },
+  });
+
+  const statusResponse = await fetch(`${baseUrl}/api/v1/commands/${commandId}`);
+  assert.equal(statusResponse.status, 200);
+  assert.equal((await statusResponse.json()).data.status, "pending");
+});
+
+test("rejects invalid commands and does not publish them", async () => {
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "buzzer.trigger",
+      duration_ms: 60_000,
+    }),
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).error.code, "validation_failed");
+  assert.equal(publishedCommands.length, 0);
+});
+
+test("returns an explicit service-unavailable error when MQTT publish fails", async () => {
+  mqttCommandClient.publishCommand = async () => {
+    throw new Error("broker offline");
+  };
+
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "leds.auto",
+    }),
+  });
+
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "mqtt_unavailable");
+});
+
+test("broadcasts device command acknowledgements and reports device status", async () => {
+  const socket = await connectWebSocket();
+  const pendingNotificationPromise = once(socket, "message");
+  const response = await fetch(`${baseUrl}/api/v1/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: "esp8266-demo",
+      action: "leds.test",
+    }),
+  });
+  const command = (await response.json()).data;
+  const [pendingMessage] = await pendingNotificationPromise;
+  const pendingNotification = JSON.parse(pendingMessage.toString());
+  const notificationPromise = once(socket, "message");
+
+  assert.equal(pendingNotification.type, "command.updated");
+  assert.equal(pendingNotification.data.command_id, command.command_id);
+  assert.equal(pendingNotification.data.status, "pending");
+
+  mqttCommandClient.emit("command-result", {
+    deviceId: "esp8266-demo",
+    payload: {
+      command_id: command.command_id,
+      status: "completed",
+    },
+  });
+  const [message] = await notificationPromise;
+  const notification = JSON.parse(message.toString());
+
+  assert.equal(notification.type, "command.updated");
+  assert.equal(notification.data.command_id, command.command_id);
+  assert.equal(notification.data.status, "completed");
+
+  deviceStatuses.set("esp8266-demo", {
+    online: true,
+    received_at: "2026-10-06T10:00:00.000Z",
+  });
+  const statusResponse = await fetch(
+    `${baseUrl}/api/v1/devices/esp8266-demo/status`,
+  );
+  assert.deepEqual((await statusResponse.json()).data, {
+    device_id: "esp8266-demo",
+    status: "online",
+    received_at: "2026-10-06T10:00:00.000Z",
+    mqtt_connected: true,
+  });
 });

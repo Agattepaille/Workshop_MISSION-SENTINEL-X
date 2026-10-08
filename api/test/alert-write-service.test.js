@@ -63,3 +63,26 @@ test("validates alert business rules before asking the repository to save", asyn
   );
   assert.equal(saveCalled, false);
 });
+
+test("rejects nested sensor/data payloads in favor of the flat alert contract", async () => {
+  const service = createAlertWriteService({
+    alertRepository: {
+      async save() {},
+    },
+  });
+
+  await assert.rejects(
+    service.create({
+      timestamp: "2026-10-07T08:15:00Z",
+      device_id: "esp8266-demo",
+      sensor: "dht22",
+      data: { temperature: 21.4, humidity: 55 },
+    }),
+    (error) => {
+      assert.ok(error instanceof AlertValidationError);
+      assert.ok(error.details.some((detail) => detail.field === "sensor"));
+      assert.ok(error.details.some((detail) => detail.field === "data"));
+      return true;
+    },
+  );
+});

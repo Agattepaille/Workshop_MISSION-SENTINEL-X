@@ -13,6 +13,22 @@ function normalizeTimestamp(value) {
   return timestamp.toISOString();
 }
 
+async function collectRows(queryResult) {
+  const rows = [];
+  for await (const row of queryResult) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+function deserializeAlert(row) {
+  return {
+    id: row.alert_id,
+    ...JSON.parse(row.payload_json),
+    received_at: row.received_at,
+  };
+}
+
 export function createAlertRepository({ client, database } = {}) {
   const connection =
     client && database ? { client, database } : createInfluxConnection();
@@ -49,20 +65,14 @@ export function createAlertRepository({ client, database } = {}) {
         ORDER BY time DESC, alert_id DESC
         LIMIT ${limit + 1}
       `;
-      const queryResult = await influxClient.query(query, influxDatabase);
-      const rows = [];
-      for await (const row of queryResult) {
-        rows.push(row);
-      }
+      const rows = await collectRows(
+        await influxClient.query(query, influxDatabase),
+      );
 
       const hasMore = rows.length > limit;
       if (hasMore) rows.pop();
 
-      const data = rows.map((row) => ({
-        id: row.alert_id,
-        ...JSON.parse(row.payload_json),
-        received_at: row.received_at,
-      }));
+      const data = rows.map(deserializeAlert);
       const lastRow = rows.at(-1);
 
       return {
@@ -76,6 +86,19 @@ export function createAlertRepository({ client, database } = {}) {
               }
             : null,
       };
+    },
+
+    async listBetween({ from, to }) {
+      const query = `
+        SELECT time, alert_id, payload_json, received_at
+        FROM alerts
+        WHERE time >= ${quoteSqlString(from)} AND time <= ${quoteSqlString(to)}
+        ORDER BY time DESC, alert_id DESC
+      `;
+      const rows = await collectRows(
+        await influxClient.query(query, influxDatabase),
+      );
+      return rows.map(deserializeAlert);
     },
 
     async close() {

@@ -1,0 +1,13 @@
+{
+  "name": "sentinel-mqtt-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pont MQTT -> API REST Sentinel-X : abonne aux mesures des cartes, les ecrit dans la base",
+  "dependencies": {
+    "mqtt": "5.14.1"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}

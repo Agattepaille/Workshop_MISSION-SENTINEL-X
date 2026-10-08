@@ -1,0 +1,11 @@
+# Construction du contexte depuis ../../ (racine du deploiement).
+# Objectif : ne rien envoyer au demon qui ne soit utile a l image.
+**/node_modules
+**/.git
+**/.env
+**/.env.*
+**/test/*.test.js
+**/*.md
+stack/secrets
+stack/.env
+stack/*.log

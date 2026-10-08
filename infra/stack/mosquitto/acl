@@ -1,10 +1,21 @@
+# Droits MQTT — principe du moindre privilege
+#
+# Une ESP ne peut qu ECRIRE ses mesures et LIRE ses propres ordres.
+# Il ne peut pas lire les capteurs des autres tables, et ne peut pas publier
+# d ordres : c est le serveur qui en a le monopole (via api/ia).
+
 user esp
 topic write sentinel/table/sensors/#
 topic read sentinel/table/actuators/#
+
+user bridge
+topic read sentinel/table/sensors/#
+
 user api
 topic read sentinel/table/sensors/#
 topic write sentinel/table/actuators/#
 topic read $SYS/#
+
 user ia
 topic read sentinel/table/sensors/#
 topic write sentinel/table/actuators/#
