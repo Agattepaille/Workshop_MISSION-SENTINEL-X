@@ -1,0 +1,122 @@
+[
+  {
+    "timestamp": "2026-10-07T08:15:00Z",
+    "device_id": "esp8266-dht22",
+    "measurements": { "temperature": 21.4, "humidity": 55.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T08:15:00Z",
+    "device_id": "esp8266-mq2",
+    "measurements": { "gasRaw": 120 },
+    "sensor_states": { "gasDetected": false }
+  },
+  {
+    "timestamp": "2026-10-07T08:15:00Z",
+    "device_id": "esp8266-pir",
+    "measurements": {},
+    "sensor_states": { "motion": false }
+  },
+  {
+    "timestamp": "2026-10-07T08:15:00Z",
+    "device_id": "esp8266-hcsr04",
+    "measurements": { "distanceCm": 110.5 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T08:30:00Z",
+    "device_id": "esp8266-dht22",
+    "measurements": { "temperature": 24.1, "humidity": 48.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T08:30:00Z",
+    "device_id": "esp8266-mq2",
+    "measurements": { "gasRaw": 268 },
+    "sensor_states": { "gasDetected": false }
+  },
+  {
+    "timestamp": "2026-10-07T08:30:00Z",
+    "device_id": "esp8266-pir",
+    "measurements": {},
+    "sensor_states": { "motion": true }
+  },
+  {
+    "timestamp": "2026-10-07T08:30:00Z",
+    "device_id": "esp8266-hcsr04",
+    "measurements": { "distanceCm": 95.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:00:00Z",
+    "device_id": "esp8266-dht22",
+    "measurements": { "temperature": 28.7, "humidity": 72.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:00:00Z",
+    "device_id": "esp8266-mq2",
+    "measurements": { "gasRaw": 735 },
+    "sensor_states": { "gasDetected": true }
+  },
+  {
+    "timestamp": "2026-10-07T09:00:00Z",
+    "device_id": "esp8266-pir",
+    "measurements": {},
+    "sensor_states": { "motion": true }
+  },
+  {
+    "timestamp": "2026-10-07T09:00:00Z",
+    "device_id": "esp8266-hcsr04",
+    "measurements": { "distanceCm": 38.4 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:15:30Z",
+    "device_id": "esp8266-dht22",
+    "measurements": { "temperature": 19.8, "humidity": 62.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:15:30Z",
+    "device_id": "esp8266-mq2",
+    "measurements": { "gasRaw": 164 },
+    "sensor_states": { "gasDetected": false }
+  },
+  {
+    "timestamp": "2026-10-07T09:15:30Z",
+    "device_id": "esp8266-pir",
+    "measurements": {},
+    "sensor_states": { "motion": true }
+  },
+  {
+    "timestamp": "2026-10-07T09:15:30Z",
+    "device_id": "esp8266-hcsr04",
+    "measurements": { "distanceCm": 240.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:30:00Z",
+    "device_id": "esp8266-dht22",
+    "measurements": { "temperature": 22.0, "humidity": 53.0 },
+    "sensor_states": {}
+  },
+  {
+    "timestamp": "2026-10-07T09:30:00Z",
+    "device_id": "esp8266-mq2",
+    "measurements": { "gasRaw": 145 },
+    "sensor_states": { "gasDetected": false }
+  },
+  {
+    "timestamp": "2026-10-07T09:30:00Z",
+    "device_id": "esp8266-pir",
+    "measurements": {},
+    "sensor_states": { "motion": false }
+  },
+  {
+    "timestamp": "2026-10-07T09:30:00Z",
+    "device_id": "esp8266-hcsr04",
+    "measurements": { "distanceCm": 198.7 },
+    "sensor_states": {}
+  }
+]

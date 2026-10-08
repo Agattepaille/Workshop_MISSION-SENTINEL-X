@@ -1,0 +1,172 @@
+# Stack applicative Sentinel-X — conteneurs isoles sur la borne (PC Serveur Local)
+#
+# Deux services, reseau interne : aucune sortie vers Internet, aucun port en
+# 0.0.0.0 (invariant 3 du projet). Le tableau de bord Beszel, lui, est hors
+# Docker, en binaire systemd : la supervision ne depend pas de ce qu elle surveille.
+
+name: sentinel-x
+
+services:
+
+  # --- Base temporelle -----------------------------------------------------
+  # InfluxDB 3 Core : c est LUI que le code de l API appelle (client
+  # @influxdata/influxdb3-client, ecriture en line protocol, lecture en SQL).
+  # Le choix vient du code, pas d un gout personnel.
+  influxdb3-core:
+    image: influxdb:3.11.6-core            # arm64 disponible ; version pincee
+    container_name: sentinel-influxdb
+    restart: unless-stopped
+    networks: [sentinel-core]
+    command:
+      - influxdb3
+      - serve
+      - --node-id=node0
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3/data
+    environment:
+      # En v3, DOCKER_INFLUXDB_INIT_* n existe plus : le jeton admin passe par
+      # un fichier monte en lecture seule et en 600 sur l hote.
+      INFLUXDB3_ADMIN_TOKEN_FILE: /run/secrets/admin-token
+    # Aucun port publie : la base vit sur le reseau interne. L administration
+    # passe par "docker compose exec influxdb3-core influxdb3 ...".
+    volumes:
+      - influxdb3-data:/var/lib/influxdb3/data
+      - ./secrets/admin-token.json:/run/secrets/admin-token:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # --- API -----------------------------------------------------------------
+  api:
+    build:
+      context: ..                          # parent de stack/ : contient api/ et stack/
+      dockerfile: stack/api/Dockerfile
+    image: sentinel-api:1.0.0
+    container_name: sentinel-api
+    restart: unless-stopped
+    networks: [sentinel-core, sentinel-edge]
+    depends_on:
+      - influxdb3-core
+    environment:
+      NODE_ENV: production
+      # Piege n 5 : dans le conteneur il faut ecouter sur 0.0.0.0, sinon rien
+      # n est relais. L exposition, elle, reste restreinte par les ports.
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      INFLUX_HOST: http://influxdb3-core:8181
+      INFLUX_DATABASE: "${INFLUX_DATABASE:-alerts}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:?variable INFLUX_TOKEN absente du .env}"
+    ports:
+      - "127.0.0.1:3000:3000"              # administration et dashboard local
+      - "10.73.42.1:3000:3000"             # ingestion par les ESP8266 depuis uap0
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # --- Proxy de socket pour la supervision ---------------------------------
+  # Beszel doit connaitre l etat des conteneurs. Plutot que de lui donner le
+  # socket Docker (equivalent a un acces root sur l hote), on interpose un
+  # proxy qui ne laisse passer QUE la lecture des conteneurs (CONTAINERS=1).
+  # Methode recommandee par le maintienor de Beszel. Port sur la loopback.
+  docker-proxy:
+    image: linuxserver/socket-proxy:3.4.6   # lscr.io ne resolvait pas via le partage de connexion
+    container_name: sentinel-docker-proxy
+    restart: unless-stopped
+    networks: [sentinel-edge]
+    environment:
+      CONTAINERS: "1"
+    ports:
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+  # --- Broker MQTT de la table ---------------------------------------------
+  # Les ESP8266 publient ici en MQTTS. Le socket reste prive : 1883 n est pas
+  # publie sur l hote, seul le reseau Docker interne y a acces.
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22-openssl   # variante openssl, arm64
+    container_name: sentinel-mosquitto
+    restart: unless-stopped
+    networks: [sentinel-core, sentinel-edge]
+    ports:
+      - "10.73.42.1:8883:8883"                # MQTTS : les ESP8266
+      - "127.0.0.1:8884:8884"                 # MQTT/WebSocket TLS : le dashboard
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/config/passwords:/mosquitto/config/passwords:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+  # --- Pont du broker vers l API --------------------------------------------
+  # Les cartes publient sur le broker ; le pont met la trame en forme et
+  # l ecrit par l API, seule porte d entree de la base. Il ne juge rien :
+  # aucun seuil ici, c est le role du modele predictif (pilier IA).
+  #
+  # Aucun port publie : le pont ouvre lui-meme ses connexions vers le broker
+  # et l API. Il reste sur le reseau interne, jamais sur celui d exposition.
+  mqtt-bridge:
+    build:
+      context: ..
+      dockerfile: stack/bridge/Dockerfile
+    image: sentinel-mqtt-bridge:1.0.0
+    container_name: sentinel-mqtt-bridge
+    restart: unless-stopped
+    networks: [sentinel-core]
+    depends_on:
+      - mosquitto
+      - api
+    environment:
+      NODE_ENV: production
+      # Identifiant dedie : son ACL se LIMITE a la lecture des capteurs. Un
+      # pont compromis ne peut donc pas publier d ordres vers les cartes.
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: bridge
+      MQTT_PASSWORD: "${MQTT_PASSWORD:?variable MQTT_PASSWORD absente du .env}"
+      MQTT_TOPIC: "sentinel/table/sensors/#"
+      API_URL: http://api:3000/api/v1/alerts
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+
+networks:
+  # Reseau ETANCHE entre l API et la base : aucun trafic sortant, et surtout
+  # aucun port publie. La base n est joignable que par l API.
+  sentinel-core:
+    internal: true
+
+  # Reseau d accroche reserve a l exposition : Docker refuse de publier un port
+  # depuis un reseau internal, d ou ce second bridge.
+  sentinel-edge:
+
+volumes:
+  influxdb3-data:
+  mosquitto-data:

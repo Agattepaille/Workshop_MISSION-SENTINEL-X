@@ -1,0 +1,19 @@
+{
+  "name": "sentinel-x",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format:check": "prettier --check \"api/**/*.{js,json,md}\" README.md package.json eslint.config.js",
+    "lint": "eslint api --max-warnings=0",
+    "test": "npm --prefix api test",
+    "check": "npm run lint && npm test",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.9.9"
+  }
+}
