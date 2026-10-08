@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import CameraControls from "@/components/dashboard/CameraControls";
 import { isValidDeviceId } from "@/config/deviceCommandTargets";
 import type {
   CommandAction,
@@ -178,6 +179,8 @@ export default function DashboardControls({
           );
         })}
       </div>
+
+      <CameraControls />
 
       {(error || statusError) && (
         <div className="px-4" role="alert" aria-live="assertive">
