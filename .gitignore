@@ -13,6 +13,7 @@ node_modules/
 
 # Firmware secrets
 firmware/include/secrets.h
+firmware/include/*/secrets.h
 
 # Python virtual environment
 .venv/
