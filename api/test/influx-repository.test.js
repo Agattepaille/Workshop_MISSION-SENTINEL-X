@@ -44,7 +44,7 @@ test("writes an alert with the InfluxDB 3 API and closes the client", async () =
   assert.equal(closed, true);
 });
 
-test("reads a bounded alert page and builds its cursor from the last returned row", async () => {
+test("reads all alerts in reverse chronological order without a limit", async () => {
   const firstId = "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f";
   const secondId = "81a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f";
   let queryArguments;
@@ -73,41 +73,15 @@ test("reads a bounded alert page and builds its cursor from the last returned ro
   };
   const repository = createAlertRepository({ client, database: "alerts" });
 
-  const page = await repository.listPage({ limit: 1 });
+  const alerts = await repository.listAll();
 
   assert.equal(queryArguments[1], "alerts");
   assert.match(queryArguments[0], /ORDER BY time DESC, alert_id DESC/);
-  assert.match(queryArguments[0], /LIMIT 2/);
-  assert.equal(page.data.length, 1);
-  assert.equal(page.data[0].id, firstId);
-  assert.deepEqual(page.data[0].measurements, alert.measurements);
-  assert.equal(page.hasMore, true);
-  assert.deepEqual(page.nextCursor, {
-    timestamp: alert.timestamp,
-    alertId: firstId,
-  });
-});
-
-test("uses the time-and-ID cursor to continue an alert page", async () => {
-  const cursor = {
-    timestamp: "2026-10-05T12:00:00.000Z",
-    alertId: "71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f",
-  };
-  let queryText;
-  const client = {
-    async query(query) {
-      queryText = query;
-      return (async function* () {})();
-    },
-    close() {},
-  };
-  const repository = createAlertRepository({ client, database: "alerts" });
-
-  const page = await repository.listPage({ limit: 50, cursor });
-
-  assert.match(queryText, /time < '2026-10-05T12:00:00\.000Z'/);
-  assert.match(queryText, /alert_id < '71a3eea1-6cdd-4af9-9aa1-bcbcc6d5268f'/);
-  assert.deepEqual(page, { data: [], hasMore: false, nextCursor: null });
+  assert.equal(queryArguments[0].includes("LIMIT"), false);
+  assert.equal(alerts.length, 2);
+  assert.equal(alerts[0].id, firstId);
+  assert.deepEqual(alerts[0].measurements, alert.measurements);
+  assert.equal(alerts[1].id, secondId);
 });
 
 test("queries and returns all alerts within a timestamp range", async () => {

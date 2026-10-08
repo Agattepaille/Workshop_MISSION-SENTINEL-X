@@ -22,7 +22,6 @@ let baseUrl;
 let websocketUrl;
 let sockets;
 let storedAlerts;
-let repositoryPageRequest;
 let repositoryTimeRange;
 let mqttCommandClient;
 let publishedCommands;
@@ -30,7 +29,6 @@ let deviceStatuses;
 
 beforeEach(async () => {
   storedAlerts = new Map();
-  repositoryPageRequest = undefined;
   repositoryTimeRange = undefined;
   publishedCommands = [];
   deviceStatuses = new Map();
@@ -52,13 +50,11 @@ beforeEach(async () => {
           received_at: receivedAt,
         });
       },
-      async listPage(pageRequest) {
-        repositoryPageRequest = pageRequest;
-        return {
-          data: [...storedAlerts.values()].slice(0, pageRequest.limit),
-          hasMore: false,
-          nextCursor: null,
-        };
+      async listAll() {
+        return [...storedAlerts.values()].sort(
+          (left, right) =>
+            Date.parse(right.timestamp) - Date.parse(left.timestamp),
+        );
       },
       async listBetween(timeRange) {
         repositoryTimeRange = timeRange;
@@ -178,7 +174,7 @@ test("returns an error and does not broadcast when persistence fails", async () 
   assert.equal((await response.json()).error.code, "internal_error");
 });
 
-test("reads alerts with cursor-pagination metadata", async () => {
+test("reads all alerts without pagination metadata", async () => {
   const createResponse = await fetch(`${baseUrl}/api/v1/alerts`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -186,16 +182,12 @@ test("reads alerts with cursor-pagination metadata", async () => {
   });
   const createdAlert = (await createResponse.json()).data;
 
-  const response = await fetch(`${baseUrl}/api/v1/alerts?limit=10`);
+  const response = await fetch(`${baseUrl}/api/v1/alerts`);
   const responseBody = await response.json();
 
   assert.equal(response.status, 200);
   assert.deepEqual(responseBody.data, [createdAlert]);
-  assert.deepEqual(responseBody.pagination, {
-    next_cursor: null,
-    has_more: false,
-  });
-  assert.deepEqual(repositoryPageRequest, { limit: 10, cursor: undefined });
+  assert.equal("pagination" in responseBody, false);
 });
 
 test("reads alerts in the requested timestamp range", async () => {
@@ -224,24 +216,20 @@ test("reads alerts in the requested timestamp range", async () => {
 
   assert.equal(response.status, 200);
   assert.deepEqual(responseBody.data, [recentAlert]);
-  assert.deepEqual(responseBody.pagination, {
-    next_cursor: null,
-    has_more: false,
-  });
+  assert.equal("pagination" in responseBody, false);
   assert.equal(
     Date.parse(repositoryTimeRange.to) - Date.parse(repositoryTimeRange.from),
     12 * 60 * 60 * 1000,
   );
-  assert.equal(repositoryPageRequest, undefined);
 });
 
 test("rejects invalid alert-list query parameters", async () => {
   for (const query of [
-    "limit=101",
     "limit=1&limit=2",
+    "limit=10",
     "cursor=invalid",
     "since=2026-10-07T00%3A00%3A00.000Z",
-    "since=2026-10-07T00%3A00%3A00.000Z&to=2026-10-07T12%3A00%3A00.000Z&limit=50",
+    "since=2026-10-07T00%3A00%3A00.000Z&to=2026-10-07T12%3A00%3A00.000Z&cursor=abc",
     "unexpected=true",
   ]) {
     const response = await fetch(`${baseUrl}/api/v1/alerts?${query}`);
@@ -250,7 +238,6 @@ test("rejects invalid alert-list query parameters", async () => {
     assert.equal(response.status, 400, query);
     assert.equal(responseBody.error.code, "invalid_query", query);
   }
-  assert.equal(repositoryPageRequest, undefined);
   assert.equal(repositoryTimeRange, undefined);
 });
 

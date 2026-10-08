@@ -7,8 +7,8 @@ The REST API accepts alerts at `POST /api/v1/alerts` and lists them at
 ## Architecture
 
 `src/services/alert-write-service.js` validates and creates alerts;
-`src/services/alert-read-service.js` validates pagination input and lists
-alerts. Their `createAlertWriteService` and `createAlertReadService` factories
+`src/services/alert-read-service.js` lists alerts. Their
+`createAlertWriteService` and `createAlertReadService` factories
 receive the repository as a dependency, keeping persistence details out of the
 services and allowing tests to inject a fake repository. The HTTP server
 handles transport concerns and delegates to the appropriate service.
@@ -78,25 +78,15 @@ a trusted network because authentication is not implemented yet.
 
 ### List alerts
 
-`GET /api/v1/alerts` returns alerts in reverse chronological order. It uses
-cursor pagination so clients can walk through the history without offset-based
-pages shifting as new alerts arrive.
-
-- `limit`: optional page size; defaults to `50` and must be between `1` and
-  `100`.
-- `cursor`: optional opaque cursor returned by the previous page.
-
-The response contains a `data` array and pagination metadata. When
-`has_more` is `true`, send `next_cursor` to retrieve the next page:
+`GET /api/v1/alerts` returns all alerts in reverse chronological order. The
+response contains a `data` array with no pagination metadata:
 
 ```sh
-curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50'
-curl -i 'http://127.0.0.1:3000/api/v1/alerts?limit=50&cursor=<next_cursor>'
+curl -i 'http://127.0.0.1:3000/api/v1/alerts'
 ```
 
 For a time-bounded query, `since` and `to` are required ISO 8601 UTC timestamps.
-The range uses the measurement timestamp and returns all matching alerts
-without cursor pagination:
+The range uses the measurement timestamp and returns all matching alerts:
 
 ```sh
 curl -G 'http://127.0.0.1:3000/api/v1/alerts' \
@@ -105,8 +95,7 @@ curl -G 'http://127.0.0.1:3000/api/v1/alerts' \
 ```
 
 Both timestamps must be canonical ISO 8601 UTC values, `since` must not be
-later than `to`, and the range cannot be combined with `limit` or `cursor`.
-Requests without `since` and `to` keep the cursor-paginated behavior above.
+later than `to`. Without `since` and `to`, the API returns all alerts.
 
 The response shape is:
 
@@ -121,11 +110,7 @@ The response shape is:
       "sensor_states": {},
       "received_at": "2026-10-05T12:00:01.000Z"
     }
-  ],
-  "pagination": {
-    "next_cursor": "<opaque cursor or null>",
-    "has_more": false
-  }
+  ]
 }
 ```
 
