@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "send:alerts": "node scripts/send-alert-dataset.js"
+    "send:alerts": "node scripts/send-alert-dataset.js",
+    "send:events": "node scripts/send-event-dataset.js"
   },
   "dependencies": {
     "@influxdata/influxdb3-client": "^2.4.0",

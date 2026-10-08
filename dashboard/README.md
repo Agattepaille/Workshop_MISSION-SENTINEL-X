@@ -1,4 +1,4 @@
-# React + TypeScript + Vite
+# SENTINEL-X Dashboard
 
 ## Running the dashboard with live alerts
 
@@ -16,10 +16,10 @@ npm run dev
 ```
 
 The Vite development proxy forwards `/api` requests and `/ws` WebSocket
-connections to the API at `http://127.0.0.1:3000`. The dashboard requests alerts from the last 12 hours using ISO 8601 UTC
-`since`/`to` parameters based on measurement timestamps, then listens for new
-`alert.created` events. If the WebSocket reconnects, it requests a fresh
-12-hour range to catch up.
+connections to the API at `http://127.0.0.1:3000`. The dashboard requests
+alerts from the last 12 hours using ISO 8601 UTC `since`/`to` parameters based
+on measurement timestamps, then listens for new `alert.created` messages. If
+the WebSocket reconnects, it requests a fresh 12-hour range to catch up.
 
 The dashboard preserves measurement keys and keeps each key in a separate
 series. It displays French labels for known keys such as `temperature_c`,
@@ -28,6 +28,24 @@ series. It displays French labels for known keys such as `temperature_c`,
 The Vite proxy only applies during development. In production, configure the
 web server or reverse proxy to forward `/api` and `/ws` to the API, including
 WebSocket upgrades.
+
+## Camera events
+
+The camera panel polls the AI Vision service at `http://127.0.0.1:5001` for
+`/detections`. On the first poll that observes a person after a poll with no
+detections, it posts one event to `POST /api/v1/events`. Further positive polls
+do not create more events; a poll with no detections rearms recording. A
+temporary disconnection does not count as an absence.
+
+The event contains `source_type: "camera"`, `source_id: "CAM-ENT-03"` and a
+timestamp captured when the dashboard first observes the presence. Because the
+vision response does not include a frame timestamp and polling is approximately
+once per second, this is not the exact YOLO detection time. No image is sent to
+the events API or stored with the event.
+
+After saving, the dashboard updates the **Dernier événement** card. On page
+load, it retrieves the latest persisted event from
+`GET /api/v1/events/latest`.
 
 ## Command controls
 

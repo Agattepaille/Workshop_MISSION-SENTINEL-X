@@ -1,0 +1,17 @@
+[
+  {
+    "timestamp": "2026-10-08T16:30:00.000Z",
+    "source_type": "camera",
+    "source_id": "CAM-ENT-03"
+  },
+  {
+    "timestamp": "2026-10-08T16:30:30.000Z",
+    "source_type": "camera",
+    "source_id": "CAM-ENT-03"
+  },
+  {
+    "timestamp": "2026-10-08T16:31:00.000Z",
+    "source_type": "camera",
+    "source_id": "CAM-ENT-03"
+  }
+]

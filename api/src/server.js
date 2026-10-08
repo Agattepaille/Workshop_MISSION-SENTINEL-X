@@ -12,6 +12,10 @@ import {
   createAlertReadService,
 } from "./services/alert-read-service.js";
 import {
+  EventValidationError,
+  createEventService,
+} from "./services/event-service.js";
+import {
   CommandDispatchError,
   CommandValidationError,
   createCommandService,
@@ -19,6 +23,8 @@ import {
 import { createMqttCommandClient } from "./mqtt-command-client.js";
 
 const ALERTS_PATH = "/api/v1/alerts";
+const EVENTS_PATH = "/api/v1/events";
+const LATEST_EVENT_PATH = `${EVENTS_PATH}/latest`;
 const COMMANDS_PATH = "/api/v1/commands";
 const COMMAND_STATUS_PATH = /^\/api\/v1\/commands\/([^/]+)$/;
 const DEVICE_STATUS_PATH = /^\/api\/v1\/devices\/([^/]+)\/status$/;
@@ -91,6 +97,9 @@ export function createAlertServer({
   });
   const alertReadService = createAlertReadService({
     alertRepository: repository,
+  });
+  const eventService = createEventService({
+    eventRepository: repository,
   });
   const mqttCommandClient =
     injectedMqttCommandClient ?? createMqttCommandClient();
@@ -268,6 +277,86 @@ export function createAlertServer({
           mqtt_connected: mqttCommandClient.connected,
         },
       });
+      return;
+    }
+
+    if (pathname === LATEST_EVENT_PATH) {
+      if (request.method !== "GET") {
+        sendJson(
+          response,
+          405,
+          {
+            error: {
+              code: "method_not_allowed",
+              message: "Use GET for this route.",
+            },
+          },
+          { allow: "GET" },
+        );
+        return;
+      }
+
+      try {
+        const event = await eventService.latest();
+        sendJson(response, 200, { data: event });
+      } catch (error) {
+        console.error("Failed to read latest event:", error);
+        sendJson(response, 500, {
+          error: {
+            code: "internal_error",
+            message: "The latest event could not be retrieved.",
+          },
+        });
+      }
+      return;
+    }
+
+    if (pathname === EVENTS_PATH) {
+      if (request.method !== "POST") {
+        sendJson(
+          response,
+          405,
+          {
+            error: {
+              code: "method_not_allowed",
+              message: "Use POST for this route.",
+            },
+          },
+          { allow: "POST" },
+        );
+        return;
+      }
+
+      try {
+        const event = await eventService.create(await readJsonBody(request));
+        broadcast("event.created", event);
+        sendJson(response, 201, { data: event });
+      } catch (error) {
+        if (error instanceof HttpError) {
+          const errorBody = { code: error.code, message: error.message };
+          if (error.details) errorBody.details = error.details;
+          sendJson(response, error.status, { error: errorBody });
+          return;
+        }
+        if (error instanceof EventValidationError) {
+          sendJson(response, 422, {
+            error: {
+              code: "validation_failed",
+              message: error.message,
+              ...(error.details.length > 0 ? { details: error.details } : {}),
+            },
+          });
+          return;
+        }
+
+        console.error("Failed to process event:", error);
+        sendJson(response, 500, {
+          error: {
+            code: "internal_error",
+            message: "The event could not be processed.",
+          },
+        });
+      }
       return;
     }
 
