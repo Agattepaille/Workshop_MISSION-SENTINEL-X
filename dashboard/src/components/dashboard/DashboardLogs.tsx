@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import type { AlertConnectionStatus } from "../../hooks/useAlerts";
 import type { DashboardLogEntry } from "./dashboardData";
+import { getDashboardLabel } from "./measurementLabels";
 
 interface DashboardLogsProps {
   entries: DashboardLogEntry[];
@@ -20,10 +21,10 @@ function formatAlert(alert: DashboardLogEntry): string {
   const timestamp = new Date(alert.timestamp).toLocaleTimeString("fr-FR");
   const details = [
     ...Object.entries(alert.measurements).map(
-      ([name, value]) => `${name}=${value}`,
+      ([name, value]) => `${getDashboardLabel(name)}=${value}`,
     ),
     ...Object.entries(alert.sensor_states).map(
-      ([name, value]) => `${name}=${value}`,
+      ([name, value]) => `${getDashboardLabel(name)}=${value}`,
     ),
   ].join(" · ");
 

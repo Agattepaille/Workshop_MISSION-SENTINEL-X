@@ -143,8 +143,9 @@ The request body must be JSON with:
 Unknown top-level fields are rejected. Measurement and sensor-state names must
 be 1-64 characters. Request bodies are limited to 16 KiB.
 
-Send one alert per sensor message, using only the corresponding fields in the
-existing `measurements` and `sensor_states` objects:
+An alert can contain one or more numeric measurements. Use the names supplied
+by the device; the API preserves them as-is. For devices that send one alert
+per sensor, the following are examples:
 
 | Sensor  | `measurements`            | `sensor_states` |
 | ------- | ------------------------- | --------------- |
@@ -159,10 +160,16 @@ Example:
 curl -i http://127.0.0.1:3000/api/v1/alerts \
   -H 'content-type: application/json' \
   -d '{
-    "timestamp": "2026-10-05T12:00:00Z",
-    "device_id": "esp8266-demo",
-    "measurements": { "temperature": 21.4, "humidity": 55 },
-    "sensor_states": {}
+    "timestamp": "2026-10-08T09:30:38.000Z",
+    "device_id": "ESP-1",
+    "measurements": {
+      "temperature_c": 24.2,
+      "humidity_pct": 51.7,
+      "gas_raw": 122
+    },
+    "sensor_states": {
+      "motion": true
+    }
   }'
 ```
 
@@ -270,8 +277,10 @@ npm test
 
 ## Send sample alerts
 
-Start the server in one terminal, then send the five valid sample alerts from
-`test/fixtures/alerts.json` in another:
+Start the server in one terminal, then send the sample alerts from
+`test/fixtures/alerts.json` in another. The fixture includes an alert adapted
+from a real database row; database-generated `alert_id` and `received_at`
+values are omitted because the API creates these itself.
 
 ```sh
 npm run send:alerts

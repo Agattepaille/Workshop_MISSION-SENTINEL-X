@@ -1,0 +1,24 @@
+[Unit]
+# Suivi du demarrage sur l ecran OLED, puis resume vivant.
+#
+# Volonte : se manifacter TOT pour montrer les premieres etapes, mais ne rien
+# exiger. Il n y a donc aucun Requires sur un service metier : si l ecran ou le
+# bus I2C manquent, le service sort proprement et rien d autre n attend apres
+# lui. Le demarrage de la borne n est jamais ralenti par un accessoire.
+Description=Afficheur OLED de la borne : etapes du demarrage puis resume
+After=local-fs.target systemd-modules-load.service
+Before=multi-user.target
+StartLimitBurst=4
+StartLimitIntervalSec=180
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sentinel-afficheur
+ExecStart=/usr/bin/python3 /opt/sentinel-afficheur/afficheur.py
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
