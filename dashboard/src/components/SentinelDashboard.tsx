@@ -1,4 +1,12 @@
-import { Suspense, lazy, useCallback, useMemo, useState, type ReactElement } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+} from "react";
 import {
   Activity,
   AlertTriangle,
@@ -28,6 +36,8 @@ const EnvironmentalCharts = lazy(
   () => import("./dashboard/EnvironmentalCharts"),
 );
 
+const PREDICTIVE_API = "http://127.0.0.1:5002/api/predictive";
+
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString("fr-FR");
 }
@@ -40,6 +50,12 @@ export default function SentinelDashboard(): ReactElement {
       count: 0,
       confidence: 0,
     });
+
+  const [predictiveData, setPredictiveData] = useState<{
+    status: "NORMAL" | "ANOMALIE" | "ERROR";
+    score: number | null;
+  } | null>(null);
+
   const {
     alerts,
     chartAlerts,
@@ -51,6 +67,7 @@ export default function SentinelDashboard(): ReactElement {
     deviceStatusError,
     commandUpdates,
   } = useAlerts(configuredDeviceIds);
+
   const {
     commands,
     latestCommand,
@@ -59,6 +76,78 @@ export default function SentinelDashboard(): ReactElement {
     statusError,
     sendCommand,
   } = useDeviceCommands(commandUpdates, connectionStatus);
+
+  /*
+   * ============================================================
+   * MAINTENANCE PRÉDICTIVE
+   * ============================================================
+   *
+   * Le modèle Isolation Forest est déjà entraîné côté Python.
+   *
+   * Le dashboard ne réentraîne PAS le modèle.
+   *
+   * Toutes les 5 secondes :
+   *
+   * Dashboard
+   *     ↓
+   * /api/predictive
+   *     ↓
+   * InfluxDB
+   *     ↓
+   * dernière mesure
+   *     ↓
+   * Isolation Forest
+   *     ↓
+   * NORMAL / ANOMALIE
+   *
+   * ============================================================
+   */
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPrediction = async () => {
+      try {
+        const response = await fetch(PREDICTIVE_API);
+
+        if (!response.ok) {
+          throw new Error("Erreur API prédictive");
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          setPredictiveData({
+            status:
+              data.status === "ANOMALIE"
+                ? "ANOMALIE"
+                : data.status === "NORMAL"
+                  ? "NORMAL"
+                  : "ERROR",
+            score:
+              typeof data.score === "number"
+                ? data.score
+                : null,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setPredictiveData(null);
+        }
+      }
+    };
+
+    // Première récupération immédiate
+    fetchPrediction();
+
+    // Actualisation toutes les 5 secondes
+    const interval = window.setInterval(fetchPrediction, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const handleDetectionChange = useCallback(
     (summary: CameraDetectionSummary) => setCameraDetection(summary),
@@ -86,6 +175,7 @@ export default function SentinelDashboard(): ReactElement {
       })),
     [chartAlerts],
   );
+
   const logEntries = useMemo(
     () =>
       alerts.map(
@@ -99,6 +189,7 @@ export default function SentinelDashboard(): ReactElement {
       ),
     [alerts],
   );
+
   const environmentReadings = [
     typeof temperature === "number"
       ? `${numberFormat.format(temperature)} °C`
@@ -107,6 +198,7 @@ export default function SentinelDashboard(): ReactElement {
       ? `${numberFormat.format(humidity)} %`
       : null,
   ].filter((reading): reading is string => reading !== null);
+
   const environmentReadingTimes = [
     temperatureAlert
       ? `Température : ${formatDateTime(temperatureAlert.timestamp)}`
@@ -117,11 +209,18 @@ export default function SentinelDashboard(): ReactElement {
   ]
     .filter((reading): reading is string => reading !== null)
     .join(" • ");
+
   const noDataValue = loading
     ? "Chargement…"
     : error
       ? "Indisponible"
       : "Aucune donnée";
+
+  /*
+   * ============================================================
+   * DÉTECTION YOLO
+   * ============================================================
+   */
 
   const detectionValue =
     cameraDetection.serviceStatus === "connecting"
@@ -135,8 +234,11 @@ export default function SentinelDashboard(): ReactElement {
             : cameraDetection.cameraStatus === "error"
               ? "Erreur de détection"
               : cameraDetection.count > 0
-                ? `${cameraDetection.count} intrus détecté${cameraDetection.count > 1 ? "s" : ""}`
+                ? `${cameraDetection.count} intrus détecté${
+                    cameraDetection.count > 1 ? "s" : ""
+                  }`
                 : "Aucun intrus";
+
   const detectionSubtext =
     cameraDetection.serviceStatus === "connecting"
       ? "Connexion au service de vision"
@@ -151,9 +253,34 @@ export default function SentinelDashboard(): ReactElement {
               : cameraDetection.count > 0
                 ? `YOLOv8 • Confiance : ${cameraDetection.confidence}%`
                 : "YOLOv8 • Surveillance active";
+
   const detectionAlert =
     cameraDetection.serviceStatus === "connected" &&
-    (cameraDetection.count > 0 || cameraDetection.cameraStatus === "error");
+    (cameraDetection.count > 0 ||
+      cameraDetection.cameraStatus === "error");
+
+  /*
+   * ============================================================
+   * ÉTAT DE LA MAINTENANCE PRÉDICTIVE
+   * ============================================================
+   */
+
+  const predictiveStatus =
+    predictiveData?.status === "ANOMALIE"
+      ? "⚠ Anomalie environnementale"
+      : predictiveData?.status === "NORMAL"
+        ? "✓ Environnement normal"
+        : "État environnemental indisponible";
+
+  const predictiveSubtext =
+    predictiveData?.score !== null &&
+    predictiveData?.score !== undefined
+      ? `Isolation Forest • Score : ${numberFormat.format(
+          predictiveData.score,
+        )}`
+      : "Isolation Forest • En attente";
+
+  const predictiveAlert = predictiveData?.status === "ANOMALIE";
 
   return (
     <div className="dark flex min-h-screen bg-black font-sans text-neutral-300">
@@ -189,7 +316,9 @@ export default function SentinelDashboard(): ReactElement {
                   ? "Non transmise"
                   : noDataValue
             }
-            subtext={environmentReadingTimes || "En attente d’une alerte."}
+            subtext={
+              environmentReadingTimes || "En attente d’une alerte."
+            }
             icon={Thermometer}
             iconColor="text-cyan-400"
           />
@@ -205,7 +334,9 @@ export default function SentinelDashboard(): ReactElement {
             }
             subtext={
               gasAlert
-                ? `Dernière lecture : ${formatDateTime(gasAlert.timestamp)}`
+                ? `Dernière lecture : ${formatDateTime(
+                    gasAlert.timestamp,
+                  )}`
                 : latestAlert
                   ? "Non transmis"
                   : "En attente d’une alerte."
@@ -214,19 +345,25 @@ export default function SentinelDashboard(): ReactElement {
             iconColor="text-amber-500"
           />
 
+          {/* ======================================================
+              DÉTECTION IA
+              YOLO + ISOLATION FOREST
+              ====================================================== */}
+
           <KpiCard
             title="Détection IA"
             value={detectionValue}
-            subtext={detectionSubtext}
+            subtext={`${detectionSubtext} • ${predictiveStatus} • ${predictiveSubtext}`}
             icon={Activity}
             iconColor={
+              predictiveAlert ||
               cameraDetection.serviceStatus !== "connected" ||
               cameraDetection.count > 0 ||
               cameraDetection.cameraStatus === "error"
                 ? "text-red-500"
                 : "text-emerald-500"
             }
-            alert={detectionAlert}
+            alert={predictiveAlert || detectionAlert}
           />
 
           <KpiCard
@@ -238,13 +375,18 @@ export default function SentinelDashboard(): ReactElement {
                 : "Aucune alerte active"
             }
             icon={AlertTriangle}
-            iconColor={latestAlert ? "text-red-500" : "text-emerald-500"}
+            iconColor={
+              latestAlert
+                ? "text-red-500"
+                : "text-emerald-500"
+            }
             alert={Boolean(latestAlert)}
           />
         </section>
 
         <section className="flex flex-1 overflow-hidden">
           <CameraPanel onDetectionChange={handleDetectionChange} />
+
           <Suspense
             fallback={
               <div

@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Charger le fichier CSV
-df = pd.read_csv("ai/predictive/sentinel_x_sensor_data.csv")
+df = pd.read_csv("C:\\Users\\PC\\Workshop_MISSION-SENTINEL-X\\ia\\predictive\\sentinel_x_esp8266_training_20000_normal.csv")
 
 # Afficher les premières lignes
 print("===== PREMIÈRES DONNÉES =====")
